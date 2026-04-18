@@ -238,7 +238,17 @@ end)
 
 RunService.Stepped:Connect(function()
     if STATE.SpinBot and lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") then
+        -- Вращаем персонажа
         lp.Character.HumanoidRootPart.CFrame *= CFrame.Angles(0, math.rad(STATE.SpinSpeed), 0)
+        
+        -- Принудительный 3-й вид
+        lp.CameraMode = Enum.CameraMode.Classic
+        lp.CameraMaxZoomDistance = 50 -- Дистанция отдаления
+        lp.CameraMinZoomDistance = 10
+    else
+        -- Возвращаем дефолтные настройки, если спинбот выключен
+        lp.CameraMaxZoomDistance = 128 
+        lp.CameraMinZoomDistance = 0.5
     end
 end)
 
