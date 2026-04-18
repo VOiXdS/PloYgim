@@ -216,4 +216,4 @@ UIS.InputBegan:Connect(function(i, g)
     end
 end)
 
-Notify("PloYgim Ultimate", "Восстановление завершено! Хитбоксы удалены.", 5)
+Notify("PloYgim Ultimate", "БЫЛА ЗАМЕЧЕНА СВАГА!!!!", 5)
