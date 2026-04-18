@@ -1,16 +1,20 @@
--- [[ PLOYGIM ULTIMATE - RECOVERY & TOXIC EDITION ]] --
+-- [[ PLOYGIM ULTIMATE - ПОЛНОСТЬЮ НА РУССКОМ + ФИКС ЧАМСОВ ]] --
 
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local StarterGui = game:GetService("StarterGui")
-local GuiService = game:GetService("GuiService")
 local lp = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
 local FILE_NAME = "PloYgim_Ultimate.json"
 local toxicClicks = 0 
+
+-- Объект физического вращения (BodyAngularVelocity)
+local bAV = Instance.new("BodyAngularVelocity")
+bAV.MaxTorque = Vector3.new(0, math.huge, 0)
+bAV.P = 15000
 
 local STATE = {
     Visible = true,
@@ -19,54 +23,67 @@ local STATE = {
     MenuBg = Color3.fromRGB(12, 12, 15),
     SectionBg = Color3.fromRGB(20, 20, 25),
     
+    -- Aim
     AimEnabled = false, AimFOV = 150, AimSmooth = 3, TeamCheck = false, WallCheck = false,
+    -- Move
     SpeedEnabled = false, SpeedPower = 2, 
     FlyEnabled = false, FlySpeed = 50,
-    Noclip = false,
-    SpinBot = false, SpinSpeed = 120,
-    BoxEsp = false, ChamsEsp = false, TargetEsp = true,
+    Noclip = false, SpinBot = false, SpinSpeed = 120,
+    -- Visuals
+    BoxEsp = false, ChamsEsp = false, TargetEsp = true, TargetHUDEnabled = true,
+    -- TP
+    TPBehindEnabled = false, TPBehindTarget = nil, TPBehindBind = "E", TPColor = Color3.fromRGB(0, 191, 255),
+    
     Bind_Menu = "RightShift"
 }
 
--- [[ ФИЗИКА SPINBOT ]]
-local bAV = Instance.new("BodyAngularVelocity")
-bAV.MaxTorque = Vector3.new(0, math.huge, 0)
-bAV.P = 15000
-
--- [[ УВЕДОМЛЕНИЯ ]]
-local function Notify(title, text, dur)
-    StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = dur or 3})
+-- [[ ПРОВЕРКИ (СТЕНЫ/КОМАНДА) ]]
+local function IsVisible(part)
+    if not STATE.WallCheck then return true end
+    local castPoints = {Camera.CFrame.Position, part.Position}
+    local ignoreList = {lp.Character, part.Parent}
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = ignoreList
+    local result = workspace:Raycast(castPoints[1], castPoints[2] - castPoints[1], params)
+    return not result
 end
 
--- [[ CONFIG SYSTEM ]]
+local function IsTeammate(player)
+    if not STATE.TeamCheck then return false end
+    return player.Team == lp.Team
+end
+
+-- [[ СИСТЕМА КОНФИГОВ ]]
 local function SaveConfig()
     local data = {}
     for k, v in pairs(STATE) do
-        if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then
-            data[k] = v
-        end
+        if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then data[k] = v end
     end
-    local success, _ = pcall(function() writefile(FILE_NAME, HttpService:JSONEncode(data)) end)
-    if success then Notify("CFG", "Настройки сохранены!") end
+    writefile(FILE_NAME, HttpService:JSONEncode(data))
+    StarterGui:SetCore("SendNotification", {Title = "КОНФИГ", Text = "Настройки успешно сохранены!"})
 end
 
 local function LoadConfig()
     if isfile(FILE_NAME) then
-        local success, result = pcall(function()
-            local decoded = HttpService:JSONDecode(readfile(FILE_NAME))
-            for k, v in pairs(decoded) do if STATE[k] ~= nil then STATE[k] = v end end
-        end)
-        if success then Notify("CFG", "Настройки загружены!") end
+        local decoded = HttpService:JSONDecode(readfile(FILE_NAME))
+        for k, v in pairs(decoded) do if STATE[k] ~= nil then STATE[k] = v end end
+        StarterGui:SetCore("SendNotification", {Title = "КОНФИГ", Text = "Настройки загружены!"})
     end
 end
 
--- [[ UI ENGINE ]]
+-- [[ UI ДВИЖОК ]]
 local UI_Elements = { Toggles = {} }
 if lp.PlayerGui:FindFirstChild("PloYgim_UI") then lp.PlayerGui.PloYgim_UI:Destroy() end
 local sg = Instance.new("ScreenGui", lp.PlayerGui); sg.Name = "PloYgim_UI"; sg.ResetOnSpawn = false
 local main = Instance.new("Frame", sg); main.Size = UDim2.new(0, 520, 0, 500); main.Position = UDim2.new(0.5, -260, 0.5, -250); main.BackgroundColor3 = STATE.MenuBg; main.BorderSizePixel = 0; main.Visible = STATE.Visible; Instance.new("UICorner", main)
 
-local modalBtn = Instance.new("TextButton", main); modalBtn.Size = UDim2.new(1, 0, 1, 0); modalBtn.BackgroundTransparency = 1; modalBtn.Text = ""; modalBtn.Modal = true 
+-- [[ ТАРГЕТ ХАД (ИНФО О ЦЕЛИ) ]]
+local thud = Instance.new("Frame", sg); thud.Size = UDim2.new(0, 200, 0, 60); thud.Position = UDim2.new(0.5, 100, 0.5, 50); thud.BackgroundColor3 = Color3.fromRGB(15, 15, 20); thud.Visible = false; thud.BorderSizePixel = 0; Instance.new("UICorner", thud)
+local thud_line = Instance.new("Frame", thud); thud_line.Size = UDim2.new(1, 0, 0, 2); thud_line.BorderSizePixel = 0
+local thud_name = Instance.new("TextLabel", thud); thud_name.Size = UDim2.new(1, -10, 0, 30); thud_name.Position = UDim2.new(0, 10, 0, 5); thud_name.BackgroundTransparency = 1; thud_name.TextColor3 = Color3.new(1,1,1); thud_name.TextXAlignment = "Left"; thud_name.Font = "GothamBold"; thud_name.TextSize = 14; thud_name.Text = "Цель"
+local thud_hp_bg = Instance.new("Frame", thud); thud_hp_bg.Size = UDim2.new(1, -20, 0, 6); thud_hp_bg.Position = UDim2.new(0, 10, 0, 40); thud_hp_bg.BackgroundColor3 = Color3.fromRGB(30, 30, 35); Instance.new("UICorner", thud_hp_bg)
+local thud_hp_fill = Instance.new("Frame", thud_hp_bg); thud_hp_fill.Size = UDim2.new(1, 0, 1, 0); thud_hp_fill.BorderSizePixel = 0; Instance.new("UICorner", thud_hp_fill)
 
 local lineHeader = Instance.new("Frame", main); lineHeader.Size = UDim2.new(1, 0, 0, 3); lineHeader.BorderSizePixel = 0
 local title = Instance.new("TextLabel", main); title.Size = UDim2.new(0, 300, 0, 45); title.Position = UDim2.new(0, 15, 0, 5); title.Text = "PloYgim ULTIMATE"; title.Font = "GothamBold"; title.TextSize = 22; title.BackgroundTransparency = 1; title.TextXAlignment = "Left"
@@ -98,7 +115,15 @@ local function addSlider(t, txt, k, min, max)
     local bg = Instance.new("Frame", f); bg.Size = UDim2.new(1, 0, 0, 5); bg.Position = UDim2.new(0, 0, 0.7, 0); bg.BackgroundColor3 = Color3.fromRGB(45, 45, 50); Instance.new("UICorner", bg)
     local fill = Instance.new("Frame", bg); fill.Size = UDim2.new((STATE[k]-min)/(max-min), 0, 1, 0); fill.BorderSizePixel = 0; Instance.new("UICorner", fill)
     table.insert(UI_Elements.Toggles, {btn = fill, key = "AlwaysOn"})
-    bg.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then local m; m = UIS.InputChanged:Connect(function(i2) if i2.UserInputType == Enum.UserInputType.MouseMovement then local pc = math.clamp((i2.Position.X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1) fill.Size = UDim2.new(pc, 0, 1, 0) local val = min + (max - min) * pc; STATE[k] = val; l.Text = txt..": "..string.format("%.1f", val) end end) UIS.InputEnded:Connect(function(i3) if i3.UserInputType == Enum.UserInputType.MouseButton1 then m:Disconnect() end end) end end)
+    bg.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            local m; m = RunService.RenderStepped:Connect(function()
+                local pc = math.clamp((UIS:GetMouseLocation().X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
+                fill.Size = UDim2.new(pc, 0, 1, 0); local val = min + (max - min) * pc; STATE[k] = val; l.Text = txt..": "..string.format("%.1f", val)
+            end)
+            local up; up = UIS.InputEnded:Connect(function(i2) if i2.UserInputType == Enum.UserInputType.MouseButton1 then m:Disconnect() up:Disconnect() end end)
+        end
+    end)
 end
 
 local function addBtn(t, txt, func)
@@ -106,114 +131,125 @@ local function addBtn(t, txt, func)
     b.MouseButton1Click:Connect(func)
 end
 
--- ВКЛАДКИ
-createTab("Aim"); createTab("Move"); createTab("Visuals"); createTab("Themes"); createTab("Colors"); createTab("Settings")
-pages["Aim"].Visible = true
+-- ВКЛАДКИ (НА РУССКОМ)
+createTab("Аим"); createTab("Движение"); createTab("Визуалы"); createTab("Темы"); createTab("Цвета"); createTab("Настройки")
+pages["Аим"].Visible = true
 
-addToggle("Aim", "Enabled", "AimEnabled"); addToggle("Aim", "Team Check", "TeamCheck"); addToggle("Aim", "Wall Check", "WallCheck")
-addSlider("Aim", "FOV", "AimFOV", 10, 800); addSlider("Aim", "Smooth", "AimSmooth", 1, 20)
+addToggle("Аим", "Включить", "AimEnabled"); addToggle("Аим", "Проверка тимы", "TeamCheck"); addToggle("Аим", "Проверка стен", "WallCheck"); addSlider("Аим", "FOV (Радиус)", "AimFOV", 10, 800); addSlider("Аим", "Плавность", "AimSmooth", 1, 20)
+addToggle("Движение", "ТП за спину (E)", "TPBehindEnabled"); addToggle("Движение", "Спидхак", "SpeedEnabled"); addSlider("Движение", "Сила скорости", "SpeedPower", 0, 15); addToggle("Движение", "Полет (Fly)", "FlyEnabled"); addSlider("Движение", "Скорость полета", "FlySpeed", 10, 300); addToggle("Движение", "Проход сквозь стены", "Noclip"); addToggle("Движение", "СпинБот (Физика)", "SpinBot"); addSlider("Движение", "Скорость вращения", "SpinSpeed", 10, 1500)
+addToggle("Визуалы", "Боксы", "BoxEsp"); addToggle("Визуалы", "Чамсы (Сквозь стены)", "ChamsEsp"); addToggle("Визуалы", "Инфо о цели", "TargetHUDEnabled")
 
-addToggle("Move", "Speed", "SpeedEnabled"); addSlider("Move", "Power", "SpeedPower", 0, 15)
-addToggle("Move", "Fly", "FlyEnabled"); addSlider("Move", "Fly Speed", "FlySpeed", 10, 300)
-addToggle("Move", "Noclip", "Noclip"); 
-addToggle("Move", "Silent Spin", "SpinBot"); addSlider("Move", "Spin Power", "SpinSpeed", 10, 1000)
+addBtn("Темы", "Токсик Мод", function() STATE.ColorR = 0; STATE.ColorG = 255; STATE.ColorB = 50; STATE.MenuBg = Color3.fromRGB(5, 15, 5); toxicClicks = toxicClicks + 1; if toxicClicks >= 4 then STATE.AimEnabled = true; STATE.AimFOV = 700; STATE.SpeedEnabled = true; toxicClicks = 0; StarterGui:SetCore("SendNotification", {Title = "ТОКСИК", Text = "РЕЖИМ УНИЧТОЖЕНИЯ ВКЛЮЧЕН!"}) end end)
+addBtn("Темы", "Кровавая Луна", function() STATE.ColorR = 255; STATE.ColorG = 0; STATE.ColorB = 0; STATE.MenuBg = Color3.fromRGB(20,5,5) end)
 
-addToggle("Visuals", "Boxes", "BoxEsp"); addToggle("Visuals", "Chams", "ChamsEsp"); addToggle("Visuals", "Skull Target", "TargetEsp")
+addSlider("Цвета", "Красный (R)", "ColorR", 0, 255); addSlider("Цвета", "Зеленый (G)", "ColorG", 0, 255); addSlider("Цвета", "Синий (B)", "ColorB", 0, 255)
+addBtn("Настройки", "СОХРАНИТЬ КФГ", SaveConfig); addBtn("Настройки", "ЗАГРУЗИТЬ КФГ", LoadConfig)
 
-addBtn("Themes", "Toxic", function() 
-    STATE.ColorR = 0; STATE.ColorG = 255; STATE.ColorB = 50; STATE.MenuBg = Color3.fromRGB(5, 15, 5)
-    toxicClicks = toxicClicks + 1
-    if toxicClicks >= 4 then
-        STATE.AimEnabled = true; STATE.AimFOV = 700; STATE.AimSmooth = 1; STATE.SpeedEnabled = true; STATE.ChamsEsp = true
-        Notify("TOXIC OVERDRIVE", "ВСЁ ВКЛЮЧЕНО!", 5); toxicClicks = 0
-    end
-end)
-addBtn("Themes", "Blood", function() STATE.ColorR = 255; STATE.ColorG = 0; STATE.ColorB = 0; STATE.MenuBg = Color3.fromRGB(20,5,5) end)
-
-addSlider("Colors", "R", "ColorR", 0, 255); addSlider("Colors", "G", "ColorG", 0, 255); addSlider("Colors", "B", "ColorB", 0, 255)
-addBtn("Settings", "SAVE CFG", SaveConfig); addBtn("Settings", "LOAD CFG", LoadConfig)
-
--- [[ LOGIC ENGINE ]]
+-- [[ ЛОГИКА ]]
 local FOV_Circle = Drawing.new("Circle"); FOV_Circle.Thickness = 1; FOV_Circle.NumSides = 60
-local ESP_Boxes = {}
 
 RunService.RenderStepped:Connect(function()
     STATE.CurrentColor = Color3.fromRGB(STATE.ColorR, STATE.ColorG, STATE.ColorB)
     main.BackgroundColor3 = STATE.MenuBg; lineHeader.BackgroundColor3 = STATE.CurrentColor; title.TextColor3 = STATE.CurrentColor
-    for _, item in pairs(UI_Elements.Toggles) do 
-        if item.key == "AlwaysOn" or STATE[item.key] then item.btn.BackgroundColor3 = STATE.CurrentColor; item.btn.BackgroundTransparency = 0 
-        else item.btn.BackgroundTransparency = 1 end 
-    end
-
+    thud_line.BackgroundColor3 = STATE.CurrentColor; thud_hp_fill.BackgroundColor3 = STATE.CurrentColor
+    
+    for _, item in pairs(UI_Elements.Toggles) do if item.key == "AlwaysOn" or STATE[item.key] then item.btn.BackgroundColor3 = STATE.CurrentColor; item.btn.BackgroundTransparency = 0 else item.btn.BackgroundTransparency = 1 end end
     FOV_Circle.Visible = (STATE.AimEnabled and STATE.Visible); FOV_Circle.Radius = STATE.AimFOV; FOV_Circle.Position = UIS:GetMouseLocation(); FOV_Circle.Color = STATE.CurrentColor
 
-    local char = lp.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChild("Humanoid")
+    local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); local hum = char and char:FindFirstChild("Humanoid")
+    local mouseLoc = UIS:GetMouseLocation()
 
-    -- Silent Spin (Physical)
+    -- SILENT SPIN (ФИЗИЧЕСКИЙ)
     if STATE.SpinBot and hrp and hum then
-        bAV.Parent = hrp; bAV.AngularVelocity = Vector3.new(0, STATE.SpinSpeed, 0)
-        hum.PlatformStand = true; hum.AutoRotate = false
-    else
+        bAV.Parent = hrp
+        bAV.AngularVelocity = Vector3.new(0, STATE.SpinSpeed, 0)
+        hum.AutoRotate = false
+        hum.PlatformStand = true 
+        if (Camera.Focus.p - Camera.CoordinateFrame.p).Magnitude < 1 then lp.CameraMode = Enum.CameraMode.Classic end
+    elseif hum then
         bAV.Parent = nil
-        if hum then hum.PlatformStand = false; hum.AutoRotate = true end
+        hum.AutoRotate = true
+        hum.PlatformStand = false
     end
 
-    -- Noclip
+    -- NOCLIP
     if STATE.Noclip and char then
         for _, v in pairs(char:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide = false end end
     end
 
-    -- Aim & Visuals
-    local aim_target = nil; local aim_dist = STATE.AimFOV
+    -- ПОИСК ЦЕЛИ
+    local aim_target = nil; local hud_p = nil; local shortest = STATE.AimFOV
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= lp and p.Character and p.Character:FindFirstChild("Head") and not IsTeammate(p) then
+            local head = p.Character.Head
+            if IsVisible(head) then
+                local pos, on = Camera:WorldToViewportPoint(head.Position)
+                if on then
+                    local d = (Vector2.new(pos.X, pos.Y) - mouseLoc).Magnitude
+                    if d < shortest then shortest = d; aim_target = head; hud_p = p end
+                end
+            end
+        end
+    end
+    STATE.TPBehindTarget = (STATE.TPBehindEnabled and hud_p) or nil
+
+    -- ТАРГЕТ ХАД
+    if STATE.TargetHUDEnabled and hud_p and hud_p.Character:FindFirstChild("Humanoid") then
+        local h = hud_p.Character.Humanoid
+        thud_name.Text = hud_p.Name; thud_hp_fill.Size = UDim2.new(math.clamp(h.Health/h.MaxHealth, 0, 1), 0, 1, 0); thud.Visible = true
+    else thud.Visible = false end
+
+    -- ЧАМСЫ (ФИКС: ОБНОВЛЕНИЕ КАЖДЫЙ КАДР)
     for _, p in pairs(Players:GetPlayers()) do
         if p ~= lp and p.Character then
-            local tChar = p.Character
-            local head = tChar:FindFirstChild("Head")
-            local pos, on = Camera:WorldToViewportPoint(head and head.Position or Vector3.new(0,0,0))
-            
-            -- Box ESP
-            if STATE.BoxEsp and on and head then
-                if not ESP_Boxes[p] then ESP_Boxes[p] = Drawing.new("Square") end
-                local b = ESP_Boxes[p]; local s = 2000 / pos.Z
-                b.Size = Vector2.new(s, s*1.5); b.Position = Vector2.new(pos.X - s/2, pos.Y - s*0.75); b.Color = STATE.CurrentColor; b.Visible = true
-            elseif ESP_Boxes[p] then ESP_Boxes[p].Visible = false end
-
-            -- Chams
-            if STATE.ChamsEsp then
-                local h = tChar:FindFirstChild("PloY_H") or Instance.new("Highlight", tChar); h.Name = "PloY_H"; h.FillColor = STATE.CurrentColor; h.Enabled = true
-            elseif tChar:FindFirstChild("PloY_H") then tChar.PloY_H.Enabled = false end
-
-            -- Aim logic
-            if STATE.AimEnabled and on and head then
-                local m = (Vector2.new(pos.X, pos.Y) - UIS:GetMouseLocation()).Magnitude
-                if m < aim_dist then aim_dist = m; aim_target = head end
+            local highlight = p.Character:FindFirstChild("PloY_Visual")
+            if STATE.ChamsEsp or (STATE.TPBehindEnabled and p == STATE.TPBehindTarget) then
+                if not highlight then 
+                    highlight = Instance.new("Highlight", p.Character)
+                    highlight.Name = "PloY_Visual"
+                end
+                highlight.Enabled = true
+                highlight.FillColor = (p == STATE.TPBehindTarget) and STATE.TPColor or STATE.CurrentColor
+                highlight.OutlineColor = Color3.new(1,1,1)
+                highlight.FillTransparency = 0.5
+                highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            else
+                if highlight then highlight:Destroy() end
             end
         end
     end
 
-    if aim_target and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+    -- СПИДХАК И ПОЛЕТ
+    if hrp and hum then
+        if STATE.SpeedEnabled and hum.MoveDirection.Magnitude > 0 then hrp.CFrame += (hum.MoveDirection * STATE.SpeedPower / 5) end
+        if STATE.FlyEnabled then
+            hrp.Velocity = Vector3.new(0, 0.1, 0)
+            local fDir = Vector3.new(0,0,0)
+            if UIS:IsKeyDown(Enum.KeyCode.W) then fDir += Camera.CFrame.LookVector end
+            if UIS:IsKeyDown(Enum.KeyCode.S) then fDir -= Camera.CFrame.LookVector end
+            if UIS:IsKeyDown(Enum.KeyCode.A) then fDir -= Camera.CFrame.RightVector end
+            if UIS:IsKeyDown(Enum.KeyCode.D) then fDir += Camera.CFrame.RightVector end
+            if fDir.Magnitude > 0 then hrp.CFrame += (fDir.Unit * (STATE.FlySpeed / 50)) end
+        end
+    end
+
+    -- АИМБОТ
+    if STATE.AimEnabled and aim_target and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
         local p = Camera:WorldToViewportPoint(aim_target.Position)
-        mousemoverel((p.X - UIS:GetMouseLocation().X)/STATE.AimSmooth, (p.Y - UIS:GetMouseLocation().Y)/STATE.AimSmooth)
-    end
-
-    -- Speed & Fly
-    if STATE.SpeedEnabled and hrp and hum then
-        if hum.MoveDirection.Magnitude > 0 then hrp.CFrame += (hum.MoveDirection * STATE.SpeedPower / 5) end
-    end
-    if STATE.FlyEnabled and hrp then
-        hrp.Velocity = Vector3.new(0, 0.1, 0)
-        if UIS:IsKeyDown(Enum.KeyCode.W) then hrp.CFrame *= CFrame.new(0,0,-STATE.FlySpeed/50) end
-        if UIS:IsKeyDown(Enum.KeyCode.S) then hrp.CFrame *= CFrame.new(0,0,STATE.FlySpeed/50) end
+        mousemoverel((p.X - mouseLoc.X)/STATE.AimSmooth, (p.Y - mouseLoc.Y)/STATE.AimSmooth)
     end
 end)
 
+-- [[ КНОПКИ ]]
 UIS.InputBegan:Connect(function(i, g)
-    if not g and i.KeyCode == Enum.KeyCode[STATE.Bind_Menu] then
-        STATE.Visible = not STATE.Visible
-        main.Visible = STATE.Visible
+    if not g then
+        if i.KeyCode == Enum.KeyCode[STATE.Bind_Menu] then 
+            STATE.Visible = not STATE.Visible; main.Visible = STATE.Visible
+        elseif i.KeyCode == Enum.KeyCode[STATE.TPBehindBind] and STATE.TPBehindEnabled and STATE.TPBehindTarget then
+            local tChar = STATE.TPBehindTarget.Character
+            if tChar and tChar:FindFirstChild("HumanoidRootPart") and lp.Character:FindFirstChild("HumanoidRootPart") then
+                lp.Character.HumanoidRootPart.CFrame = tChar.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
+            end
+        end
     end
 end)
-
-Notify("PloYgim Ultimate", "БЫЛА ЗАМЕЧЕНА СВАГА!!!!", 5)
