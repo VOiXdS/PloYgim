@@ -33,19 +33,46 @@ local function Notify(title, text, dur)
     StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = dur or 3})
 end
 
--- [[ КОНФИГИ ]]
+-- [[ УЛУЧШЕННЫЕ КОНФИГИ ]]
 local function SaveConfig()
     local data = {}
-    for k, v in pairs(STATE) do if typeof(v) ~= "Color3" then data[k] = v end end
-    writefile(FILE_NAME, HttpService:JSONEncode(data))
-    Notify("PloYgim CFG", "СОХРАНЕН!")
+    for k, v in pairs(STATE) do
+        -- Сохраняем только числа, строки и булевы значения
+        if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then
+            data[k] = v
+        end
+    end
+    
+    local success, result = pcall(function()
+        writefile(FILE_NAME, HttpService:JSONEncode(data))
+    end)
+    
+    if success then
+        Notify("PloYgim CFG", "Конфиг успешно сохранен!")
+    else
+        Notify("PloYgim ERROR", "Ошибка сохранения: " .. tostring(result))
+    end
 end
 
 local function LoadConfig()
-    if isfile(FILE_NAME) then
-        local data = HttpService:JSONDecode(readfile(FILE_NAME))
-        for k, v in pairs(data) do STATE[k] = v end
-        Notify("PloYgim CFG", "ЗАГРУЖЕН!")
+    if not isfile(FILE_NAME) then 
+        Notify("PloYgim CFG", "Файл конфига не найден")
+        return 
+    end
+    
+    local success, result = pcall(function()
+        local decoded = HttpService:JSONDecode(readfile(FILE_NAME))
+        for k, v in pairs(decoded) do
+            if STATE[k] ~= nil then
+                STATE[k] = v
+            end
+        end
+    end)
+    
+    if success then
+        Notify("PloYgim CFG", "Настройки загружены!")
+    else
+        Notify("PloYgim ERROR", "Ошибка загрузки: " .. tostring(result))
     end
 end
 
@@ -107,12 +134,27 @@ addToggle("Move", "Speed", "SpeedEnabled"); addSlider("Move", "Power", "SpeedPow
 addToggle("Move", "Noclip", "Noclip"); addToggle("Move", "SpinBot", "SpinBot"); addSlider("Move", "Spin Speed", "SpinSpeed", 1, 100)
 addToggle("Visuals", "Boxes", "BoxEsp"); addToggle("Visuals", "Chams", "ChamsEsp"); addToggle("Visuals", "Skull Target", "TargetEsp")
 
--- ПАСХАЛКА В ТЕМЕ TOXIC
+-- ПАСХАЛКА В ТЕМЕ TOXIC С АВТО-ВКЛЮЧЕНИЕМ ФУНКЦИЙ
 addBtn("Themes", "Toxic", function() 
-    STATE.ColorR = 0; STATE.ColorG = 255; STATE.ColorB = 50; STATE.MenuBg = Color3.fromRGB(10,20,10)
+    -- Цвета
+    STATE.ColorR = 0; STATE.ColorG = 255; STATE.ColorB = 50
+    STATE.MenuBg = Color3.fromRGB(10,20,10)
+    
     toxicClicks = toxicClicks + 1
+    
     if toxicClicks == 4 then
-        Notify("PloYgim Legacy", "А вы знали что самый первый билд PloYfim был сделан в 17.04.25?", 7)
+        -- Активация функций
+        STATE.AimEnabled = true
+        STATE.WallCheck = true
+        STATE.ChamsEsp = true -- ВКЛЮЧАЕМ ЧАМСЫ
+        
+        -- Выкручиваем настройки на "агрессивные"
+        STATE.AimFOV = 600 -- Большой радиус
+        STATE.AimSmooth = 2.4 -- Мгновенная наводка
+        STATE.HitboxEnabled = false -- Увеличиваем головы
+        STATE.HitboxSize = 0
+        
+        Notify("TOXIC OVERDRIVE", "ALL SYSTEMS GO!", 5)
         toxicClicks = 0
     end
 end)
@@ -206,6 +248,10 @@ UIS.InputBegan:Connect(function(i, g)
         main.Visible = STATE.Visible
         modalBtn.Modal = STATE.Visible
         UIS.MouseIconEnabled = STATE.Visible
-        if STATE.Visible then GuiService.SelectedObject = modalBtn else GuiService.SelectedObject = nil end
+        if STATE.Visible then 
+            GuiService.SelectedObject = modalBtn 
+        else 
+            GuiService.SelectedObject = nil 
+        end
     end
 end)
