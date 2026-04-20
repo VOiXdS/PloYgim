@@ -1,255 +1,466 @@
--- [[ PLOYGIM ULTIMATE - ПОЛНОСТЬЮ НА РУССКОМ + ФИКС ЧАМСОВ ]] --
+-- [[ PLOYGIM ULTIMATE - V13.1 THEME UPDATE ]] --
+-- [[ FULL FUNCTIONALITY + INTEGRATED GUI | ESP FIXED | DRAG LOCK FIXED | HOOK BIND: Q ]] --
 
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local StarterGui = game:GetService("StarterGui")
+local TweenService = game:GetService("TweenService")
 local lp = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
-local FILE_NAME = "PloYgim_Ultimate.json"
+local FILE_NAME = "PloYgim_Config.json"
 local toxicClicks = 0 
+local lastGrounded = true
+local targetUpdateTick = 0
+local isSliderActive = false -- Флаг-предохранитель для слайдеров
 
--- Объект физического вращения (BodyAngularVelocity)
-local bAV = Instance.new("BodyAngularVelocity")
-bAV.MaxTorque = Vector3.new(0, math.huge, 0)
-bAV.P = 15000
-
+-- [[ ГЛОБАЛЬНОЕ СОСТОЯНИЕ ]]
 local STATE = {
     Visible = true,
-    CurrentColor = Color3.fromRGB(160, 32, 240),
+    AccentColor = Color3.fromRGB(160, 32, 240),
     ColorR = 160, ColorG = 32, ColorB = 240,
-    MenuBg = Color3.fromRGB(12, 12, 15),
-    SectionBg = Color3.fromRGB(20, 20, 25),
+    CurrentTheme = "Toxic",
     
     -- Aim
     AimEnabled = false, AimFOV = 150, AimSmooth = 3, TeamCheck = false, WallCheck = false,
+    LockedPart = nil,
+    
+    -- Friends
+    Friends = {}, 
+    
     -- Move
     SpeedEnabled = false, SpeedPower = 2, 
     FlyEnabled = false, FlySpeed = 50,
     Noclip = false, SpinBot = false, SpinSpeed = 120,
-    -- Visuals
-    BoxEsp = false, ChamsEsp = false, TargetEsp = true, TargetHUDEnabled = true,
-    -- TP
-    TPBehindEnabled = false, TPBehindTarget = nil, TPBehindBind = "E", TPColor = Color3.fromRGB(0, 191, 255),
+    BhopEnabled = false, BhopPower = 16, BhopMax = 240,
+    HookEnabled = false, HookSpeed = 150,
     
+    -- Visuals
+    BoxEsp = false, ChamsEsp = false,
+    TargetHUDEnabled = true,
+    TPBehindEnabled = false, TPBehindTarget = nil,
+    
+    -- Config
     Bind_Menu = "RightShift"
 }
 
--- [[ ПРОВЕРКИ (СТЕНЫ/КОМАНДА) ]]
+-- Физические объекты
+local bAV = Instance.new("BodyAngularVelocity")
+bAV.MaxTorque = Vector3.new(0, math.huge, 0)
+bAV.P = 15000
+
+local hookForce = Instance.new("BodyVelocity")
+hookForce.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+
+-- [[ ТЕМЫ ]]
+local Themes = {
+    Toxic = {
+        Accent = Color3.fromRGB(0, 255, 100),
+        Grad1 = Color3.fromRGB(5, 15, 5), Grad2 = Color3.fromRGB(10, 30, 10)
+    },
+    Vampire = {
+        Accent = Color3.fromRGB(255, 0, 50),
+        Grad1 = Color3.fromRGB(15, 5, 5), Grad2 = Color3.fromRGB(30, 10, 10)
+    },
+    Midnight = {
+        Accent = Color3.fromRGB(100, 100, 255),
+        Grad1 = Color3.fromRGB(5, 5, 15), Grad2 = Color3.fromRGB(10, 10, 30)
+    }
+}
+
+-- [[ ПРОВЕРКИ ]]
 local function IsVisible(part)
     if not STATE.WallCheck then return true end
-    local castPoints = {Camera.CFrame.Position, part.Position}
-    local ignoreList = {lp.Character, part.Parent}
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = ignoreList
-    local result = workspace:Raycast(castPoints[1], castPoints[2] - castPoints[1], params)
+    params.FilterDescendantsInstances = {lp.Character, part.Parent}
+    local result = workspace:Raycast(Camera.CFrame.Position, part.Position - Camera.CFrame.Position, params)
     return not result
 end
 
+local function IsFriend(userId)
+    for _, id in pairs(STATE.Friends) do
+        if tonumber(id) == userId then return true end
+    end
+    return false
+end
+
 local function IsTeammate(player)
+    if IsFriend(player.UserId) then return true end
     if not STATE.TeamCheck then return false end
     return player.Team == lp.Team
 end
 
--- [[ СИСТЕМА КОНФИГОВ ]]
+-- [[ КОНФИГИ ]]
 local function SaveConfig()
     local data = {}
     for k, v in pairs(STATE) do
-        if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then data[k] = v end
+        if type(v) ~= "table" and type(v) ~= "userdata" then data[k] = v end
     end
-    writefile(FILE_NAME, HttpService:JSONEncode(data))
-    StarterGui:SetCore("SendNotification", {Title = "КОНФИГ", Text = "Настройки успешно сохранены!"})
+    local success, err = pcall(function()
+        writefile(FILE_NAME, HttpService:JSONEncode(data))
+    end)
+    if success then
+        StarterGui:SetCore("SendNotification", {Title = "Config", Text = "Saved Successfully!", Duration = 2})
+    end
 end
 
 local function LoadConfig()
     if isfile(FILE_NAME) then
-        local decoded = HttpService:JSONDecode(readfile(FILE_NAME))
-        for k, v in pairs(decoded) do if STATE[k] ~= nil then STATE[k] = v end end
-        StarterGui:SetCore("SendNotification", {Title = "КОНФИГ", Text = "Настройки загружены!"})
+        local success, decoded = pcall(function() return HttpService:JSONDecode(readfile(FILE_NAME)) end)
+        if success then 
+            for k, v in pairs(decoded) do if STATE[k] ~= nil then STATE[k] = v end end
+            StarterGui:SetCore("SendNotification", {Title = "Config", Text = "Loaded Successfully!", Duration = 2})
+        end
     end
 end
 
--- [[ UI ДВИЖОК ]]
-local UI_Elements = { Toggles = {} }
-if lp.PlayerGui:FindFirstChild("PloYgim_UI") then lp.PlayerGui.PloYgim_UI:Destroy() end
-local sg = Instance.new("ScreenGui", lp.PlayerGui); sg.Name = "PloYgim_UI"; sg.ResetOnSpawn = false
-local main = Instance.new("Frame", sg); main.Size = UDim2.new(0, 520, 0, 500); main.Position = UDim2.new(0.5, -260, 0.5, -250); main.BackgroundColor3 = STATE.MenuBg; main.BorderSizePixel = 0; main.Visible = STATE.Visible; Instance.new("UICorner", main)
+-- [[ UI КОРПУС ]]
+local sg = Instance.new("ScreenGui", lp.PlayerGui); 
+sg.Name = "PloYgim_V13"; 
+sg.ResetOnSpawn = false;
+sg.DisplayOrder = 999999;
+sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- [[ ТАРГЕТ ХАД (ИНФО О ЦЕЛИ) ]]
-local thud = Instance.new("Frame", sg); thud.Size = UDim2.new(0, 200, 0, 60); thud.Position = UDim2.new(0.5, 100, 0.5, 50); thud.BackgroundColor3 = Color3.fromRGB(15, 15, 20); thud.Visible = false; thud.BorderSizePixel = 0; Instance.new("UICorner", thud)
-local thud_line = Instance.new("Frame", thud); thud_line.Size = UDim2.new(1, 0, 0, 2); thud_line.BorderSizePixel = 0
-local thud_name = Instance.new("TextLabel", thud); thud_name.Size = UDim2.new(1, -10, 0, 30); thud_name.Position = UDim2.new(0, 10, 0, 5); thud_name.BackgroundTransparency = 1; thud_name.TextColor3 = Color3.new(1,1,1); thud_name.TextXAlignment = "Left"; thud_name.Font = "GothamBold"; thud_name.TextSize = 14; thud_name.Text = "Цель"
-local thud_hp_bg = Instance.new("Frame", thud); thud_hp_bg.Size = UDim2.new(1, -20, 0, 6); thud_hp_bg.Position = UDim2.new(0, 10, 0, 40); thud_hp_bg.BackgroundColor3 = Color3.fromRGB(30, 30, 35); Instance.new("UICorner", thud_hp_bg)
-local thud_hp_fill = Instance.new("Frame", thud_hp_bg); thud_hp_fill.Size = UDim2.new(1, 0, 1, 0); thud_hp_fill.BorderSizePixel = 0; Instance.new("UICorner", thud_hp_fill)
+local main = Instance.new("Frame", sg)
+main.Size = UDim2.new(0, 680, 0, 480); main.Position = UDim2.new(0.5, -340, 0.5, -240); main.BorderSizePixel = 0
+main.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+local mainCorner = Instance.new("UICorner", main)
+local mainStroke = Instance.new("UIStroke", main); mainStroke.Thickness = 2
+local mainGrad = Instance.new("UIGradient", main); mainGrad.Rotation = 45
 
-local lineHeader = Instance.new("Frame", main); lineHeader.Size = UDim2.new(1, 0, 0, 3); lineHeader.BorderSizePixel = 0
-local title = Instance.new("TextLabel", main); title.Size = UDim2.new(0, 300, 0, 45); title.Position = UDim2.new(0, 15, 0, 5); title.Text = "PloYgim ULTIMATE"; title.Font = "GothamBold"; title.TextSize = 22; title.BackgroundTransparency = 1; title.TextXAlignment = "Left"
-local container = Instance.new("Frame", main); container.Size = UDim2.new(1, -160, 1, -70); container.Position = UDim2.new(0, 145, 0, 55); container.BackgroundTransparency = 1
-local side = Instance.new("Frame", main); side.Size = UDim2.new(0, 130, 1, -60); side.Position = UDim2.new(0, 10, 0, 50); side.BackgroundTransparency = 1
-Instance.new("UIListLayout", side).Padding = UDim.new(0, 5)
+-- Сайдбар
+local sidebar = Instance.new("Frame", main)
+sidebar.Size = UDim2.new(0, 160, 1, 0); sidebar.BackgroundTransparency = 0.5; sidebar.BackgroundColor3 = Color3.new(0,0,0)
+Instance.new("UICorner", sidebar)
 
+-- ИСПРАВЛЕННЫЙ ДРАГ (Захват только за сайдбар и блокировка если активен слайдер)
+local dragging, dragStart, startPos
+sidebar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and not isSliderActive then
+        dragging = true; dragStart = input.Position; startPos = main.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement and not isSliderActive then
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local logo = Instance.new("TextLabel", sidebar)
+logo.Size = UDim2.new(1, 0, 0, 60); logo.Text = "PLOYGIM V13"; logo.Font = "GothamBold"; logo.TextSize = 18; logo.TextColor3 = Color3.new(1,1,1); logo.BackgroundTransparency = 1
+
+local tabHold = Instance.new("ScrollingFrame", sidebar)
+tabHold.Size = UDim2.new(1, 0, 1, -60); tabHold.Position = UDim2.new(0, 0, 0, 60); tabHold.BackgroundTransparency = 1; tabHold.ScrollBarThickness = 0
+Instance.new("UIListLayout", tabHold).Padding = UDim.new(0, 5)
+
+local content = Instance.new("Frame", main)
+content.Size = UDim2.new(1, -170, 1, -20); content.Position = UDim2.new(0, 165, 0, 10); content.BackgroundTransparency = 1
+
+-- TARGET HUD
+local function MakeHUD(name, size, pos)
+    local f = Instance.new("Frame", sg); f.Name = name; f.Size = size; f.Position = pos; f.BackgroundColor3 = Color3.fromRGB(15,15,17)
+    Instance.new("UICorner", f); local s = Instance.new("UIStroke", f); s.Thickness = 1; s.Color = Color3.fromRGB(50,50,50)
+    local acc = Instance.new("Frame", f); acc.Name = "Accent"; acc.Size = UDim2.new(0, 2, 1, 0); acc.BorderSizePixel = 0
+    return f
+end
+
+local targetHud = MakeHUD("Target", UDim2.new(0, 180, 0, 50), UDim2.new(0.5, 50, 0.5, 50))
+local targetName = Instance.new("TextLabel", targetHud); targetName.Size = UDim2.new(1, -10, 0, 25); targetName.Position = UDim2.new(0, 8, 0, 5); targetName.TextColor3 = Color3.new(1,1,1); targetName.Font = "GothamMedium"; targetName.TextSize = 13; targetName.BackgroundTransparency = 1; targetName.TextXAlignment = "Left"
+local targetHPBg = Instance.new("Frame", targetHud); targetHPBg.Size = UDim2.new(1, -16, 0, 4); targetHPBg.Position = UDim2.new(0, 8, 0, 35); targetHPBg.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+local targetHPFill = Instance.new("Frame", targetHPBg); targetHPFill.Name = "Fill"; targetHPFill.Size = UDim2.new(1, 0, 1, 0); targetHPFill.BorderSizePixel = 0
+
+-- Билдер вкладок
 local pages = {}
-local function createTab(n)
-    local p = Instance.new("ScrollingFrame", container); p.Size = UDim2.new(1, 0, 1, 0); p.BackgroundTransparency = 1; p.Visible = false; p.ScrollBarThickness = 0
-    local layout = Instance.new("UIListLayout", p); layout.Padding = UDim.new(0, 8); layout.HorizontalAlignment = "Center"
-    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() p.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10) end)
-    pages[n] = p
-    local b = Instance.new("TextButton", side); b.Size = UDim2.new(1, 0, 0, 35); b.Text = n; b.Font = "GothamBold"; b.BackgroundColor3 = STATE.SectionBg; b.TextColor3 = Color3.new(0.7, 0.7, 0.7); b.BorderSizePixel = 0; Instance.new("UICorner", b)
-    b.MouseButton1Click:Connect(function() for _, pg in pairs(pages) do pg.Visible = false end p.Visible = true end)
-    return b
+local toggles = {}
+
+local function createTab(name)
+    local p = Instance.new("ScrollingFrame", content); p.Size = UDim2.new(1, 0, 1, 0); p.BackgroundTransparency = 1; p.Visible = false; p.ScrollBarThickness = 2
+    Instance.new("UIListLayout", p).Padding = UDim.new(0, 10)
+    pages[name] = p
+    
+    local b = Instance.new("TextButton", tabHold); b.Size = UDim2.new(1, -10, 0, 35); b.Text = name; b.Font = "GothamMedium"; b.TextColor3 = Color3.fromRGB(180, 180, 180); b.BackgroundTransparency = 1; b.TextSize = 14
+    b.MouseButton1Click:Connect(function()
+        for _, v in pairs(pages) do v.Visible = false end
+        for _, v in pairs(tabHold:GetChildren()) do if v:IsA("TextButton") then v.TextColor3 = Color3.fromRGB(180, 180, 180) end end
+        p.Visible = true; b.TextColor3 = Color3.new(1,1,1)
+    end)
+    return p
 end
 
-local function addToggle(t, txt, k)
-    local b = Instance.new("TextButton", pages[t]); b.Size = UDim2.new(1, -10, 0, 35); b.Text = "  "..txt; b.TextColor3 = Color3.new(0.9, 0.9, 0.9); b.TextXAlignment = "Left"; b.Font = "GothamMedium"; b.BackgroundColor3 = Color3.fromRGB(25, 25, 30); b.BorderSizePixel = 0; Instance.new("UICorner", b)
-    local ind = Instance.new("Frame", b); ind.Size = UDim2.new(0, 4, 1, 0); ind.BorderSizePixel = 0
-    table.insert(UI_Elements.Toggles, {btn = ind, key = k})
-    b.MouseButton1Click:Connect(function() STATE[k] = not STATE[k] end)
+local function addToggle(p, text, key)
+    local b = Instance.new("TextButton", p); b.Size = UDim2.new(1, -10, 0, 35); b.BackgroundColor3 = Color3.fromRGB(25, 25, 30); b.Text = "  " .. text; b.TextColor3 = Color3.new(0.8, 0.8, 0.8); b.Font = "Gotham"; b.TextSize = 13; b.TextXAlignment = "Left"
+    Instance.new("UICorner", b)
+    local ind = Instance.new("Frame", b); ind.Size = UDim2.new(0, 15, 0, 15); ind.Position = UDim2.new(1, -25, 0.5, -7); ind.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+    Instance.new("UICorner", ind)
+    local fill = Instance.new("Frame", ind); fill.Name = "Fill"; fill.Size = UDim2.new(1, -4, 1, -4); fill.Position = UDim2.new(0, 2, 0, 2); fill.BackgroundTransparency = 1; Instance.new("UICorner", fill)
+    
+    b.MouseButton1Click:Connect(function()
+        STATE[key] = not STATE[key]
+    end)
+    toggles[key] = fill
 end
 
-local function addSlider(t, txt, k, min, max)
-    local f = Instance.new("Frame", pages[t]); f.Size = UDim2.new(1, -10, 0, 50); f.BackgroundTransparency = 1
-    local l = Instance.new("TextLabel", f); l.Size = UDim2.new(1, 0, 0, 20); l.Text = txt..": "..string.format("%.1f", STATE[k]); l.TextColor3 = Color3.new(0.8,0.8,0.8); l.BackgroundTransparency = 1; l.TextXAlignment = "Left"; l.Font = "Gotham"; l.TextSize = 12
-    local bg = Instance.new("Frame", f); bg.Size = UDim2.new(1, 0, 0, 5); bg.Position = UDim2.new(0, 0, 0.7, 0); bg.BackgroundColor3 = Color3.fromRGB(45, 45, 50); Instance.new("UICorner", bg)
-    local fill = Instance.new("Frame", bg); fill.Size = UDim2.new((STATE[k]-min)/(max-min), 0, 1, 0); fill.BorderSizePixel = 0; Instance.new("UICorner", fill)
-    table.insert(UI_Elements.Toggles, {btn = fill, key = "AlwaysOn"})
-    bg.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then
-            local m; m = RunService.RenderStepped:Connect(function()
-                local pc = math.clamp((UIS:GetMouseLocation().X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
-                fill.Size = UDim2.new(pc, 0, 1, 0); local val = min + (max - min) * pc; STATE[k] = val; l.Text = txt..": "..string.format("%.1f", val)
+-- ИСПРАВЛЕННЫЙ СЛАЙДЕР (Принудительно стопает драг меню)
+local function addSlider(p, text, key, min, max)
+    local f = Instance.new("Frame", p); f.Size = UDim2.new(1, -10, 0, 45); f.BackgroundTransparency = 1
+    local t = Instance.new("TextLabel", f); t.Size = UDim2.new(1, 0, 0, 20); t.Text = text .. ": " .. string.format("%.1f", STATE[key]); t.TextColor3 = Color3.new(0.7,0.7,0.7); t.Font = "Gotham"; t.TextSize = 11; t.BackgroundTransparency = 1
+    local bg = Instance.new("Frame", f); bg.Size = UDim2.new(1, -20, 0, 4); bg.Position = UDim2.new(0, 10, 0, 30); bg.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+    local fill = Instance.new("Frame", bg); fill.Name = "Fill"; fill.Size = UDim2.new((STATE[key]-min)/(max-min), 0, 1, 0); fill.BorderSizePixel = 0
+    bg.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            isSliderActive = true -- Блокировка драга
+            dragging = false -- Остановка текущего драга
+            local move; move = RunService.RenderStepped:Connect(function()
+                local pc = math.clamp((UIS:GetMouseLocation().X - bg.AbsolutePosition.X)/bg.AbsoluteSize.X, 0, 1)
+                fill.Size = UDim2.new(pc, 0, 1, 0)
+                local val = min + (max-min)*pc
+                STATE[key] = val; t.Text = text .. ": " .. string.format("%.1f", val)
             end)
-            local up; up = UIS.InputEnded:Connect(function(i2) if i2.UserInputType == Enum.UserInputType.MouseButton1 then m:Disconnect() up:Disconnect() end end)
+            UIS.InputEnded:Connect(function(i2) 
+                if i2.UserInputType == Enum.UserInputType.MouseButton1 then 
+                    move:Disconnect()
+                    isSliderActive = false -- Снятие блокировки
+                end 
+            end)
         end
     end)
 end
 
-local function addBtn(t, txt, func)
-    local b = Instance.new("TextButton", pages[t]); b.Size = UDim2.new(1, -10, 0, 35); b.Text = txt; b.TextColor3 = Color3.new(1,1,1); b.Font = "GothamBold"; b.BackgroundColor3 = Color3.fromRGB(35, 35, 40); b.BorderSizePixel = 0; Instance.new("UICorner", b)
-    b.MouseButton1Click:Connect(func)
+local function addBtn(p, text, func, color)
+    local b = Instance.new("TextButton", p); b.Size = UDim2.new(1, -10, 0, 35); b.BackgroundColor3 = color or STATE.AccentColor; b.Text = text; b.TextColor3 = Color3.new(1,1,1); b.Font = "GothamBold"; b.TextSize = 13
+    Instance.new("UICorner", b); b.MouseButton1Click:Connect(func)
+    return b
 end
 
--- ВКЛАДКИ (НА РУССКОМ)
-createTab("Аим"); createTab("Движение"); createTab("Визуалы"); createTab("Темы"); createTab("Цвета"); createTab("Настройки")
-pages["Аим"].Visible = true
+-- Вкладки
+local aimTab = createTab("Aim")
+addToggle(aimTab, "Enabled Aimbot", "AimEnabled")
+addToggle(aimTab, "Team Check", "TeamCheck")
+addToggle(aimTab, "Wall Check", "WallCheck")
+addSlider(aimTab, "FOV Radius", "AimFOV", 10, 800)
+addSlider(aimTab, "Smoothness", "AimSmooth", 1, 20)
 
-addToggle("Аим", "Включить", "AimEnabled"); addToggle("Аим", "Проверка тимы", "TeamCheck"); addToggle("Аим", "Проверка стен", "WallCheck"); addSlider("Аим", "FOV (Радиус)", "AimFOV", 10, 800); addSlider("Аим", "Плавность", "AimSmooth", 1, 20)
-addToggle("Движение", "ТП за спину (E)", "TPBehindEnabled"); addToggle("Движение", "Спидхак", "SpeedEnabled"); addSlider("Движение", "Сила скорости", "SpeedPower", 0, 15); addToggle("Движение", "Полет (Fly)", "FlyEnabled"); addSlider("Движение", "Скорость полета", "FlySpeed", 10, 300); addToggle("Движение", "Проход сквозь стены", "Noclip"); addToggle("Движение", "СпинБот (Физика)", "SpinBot"); addSlider("Движение", "Скорость вращения", "SpinSpeed", 10, 1500)
-addToggle("Визуалы", "Боксы", "BoxEsp"); addToggle("Визуалы", "Чамсы (Сквозь стены)", "ChamsEsp"); addToggle("Визуалы", "Инфо о цели", "TargetHUDEnabled")
+local moveTab = createTab("Movement")
+addToggle(moveTab, "OMNI-BHOP (+3)", "BhopEnabled")
+addSlider(moveTab, "BhopMax", "BhopMax", 16, 500)
+addToggle(moveTab, "Speed Hack", "SpeedEnabled")
+addSlider(moveTab, "Speed Power", "SpeedPower", 0, 15)
+addToggle(moveTab, "Hook Point (Q)", "HookEnabled")
+addSlider(moveTab, "Hook Speed", "HookSpeed", 10, 500)
+addToggle(moveTab, "TP Behind (E)", "TPBehindEnabled")
+addToggle(moveTab, "Fly Mode", "FlyEnabled")
+addSlider(moveTab, "Fly Speed", "FlySpeed", 10, 500)
+addToggle(moveTab, "Spinbot", "SpinBot")
+addToggle(moveTab, "Noclip", "Noclip")
 
-addBtn("Темы", "Токсик Мод", function() STATE.ColorR = 0; STATE.ColorG = 255; STATE.ColorB = 50; STATE.MenuBg = Color3.fromRGB(5, 15, 5); toxicClicks = toxicClicks + 1; if toxicClicks >= 4 then STATE.AimEnabled = true; STATE.AimFOV = 700; STATE.SpeedEnabled = true; toxicClicks = 0; StarterGui:SetCore("SendNotification", {Title = "ТОКСИК", Text = "РЕЖИМ УНИЧТОЖЕНИЯ ВКЛЮЧЕН!"}) end end)
-addBtn("Темы", "Кровавая Луна", function() STATE.ColorR = 255; STATE.ColorG = 0; STATE.ColorB = 0; STATE.MenuBg = Color3.fromRGB(20,5,5) end)
+local visTab = createTab("Visuals")
+addToggle(visTab, "Box ESP", "BoxEsp")
+addToggle(visTab, "Chams ESP", "ChamsEsp")
+addToggle(visTab, "Target HUD", "TargetHUDEnabled")
 
-addSlider("Цвета", "Красный (R)", "ColorR", 0, 255); addSlider("Цвета", "Зеленый (G)", "ColorG", 0, 255); addSlider("Цвета", "Синий (B)", "ColorB", 0, 255)
-addBtn("Настройки", "СОХРАНИТЬ КФГ", SaveConfig); addBtn("Настройки", "ЗАГРУЗИТЬ КФГ", LoadConfig)
+local friendsTab = createTab("Friends")
+addBtn(friendsTab, "ADD TARGET TO FRIENDS", function()
+    if STATE.TPBehindTarget then
+        if not IsFriend(STATE.TPBehindTarget.UserId) then
+            table.insert(STATE.Friends, STATE.TPBehindTarget.UserId)
+            StarterGui:SetCore("SendNotification", {Title = "Friends", Text = STATE.TPBehindTarget.Name.." added!"})
+        end
+    end
+end)
+addBtn(friendsTab, "CLEAR FRIENDS", function() STATE.Friends = {} end)
 
--- [[ ЛОГИКА ]]
+local themesTab = createTab("Themes")
+addBtn(themesTab, "TOXIC GREEN", function() 
+    STATE.CurrentTheme = "Toxic"; STATE.ColorR = 0; STATE.ColorG = 255; STATE.ColorB = 50;
+end, Color3.fromRGB(0, 200, 80))
+addBtn(themesTab, "VAMPIRE RED", function() 
+    STATE.CurrentTheme = "Vampire"; STATE.ColorR = 255; STATE.ColorG = 0; STATE.ColorB = 0; 
+end, Color3.fromRGB(200, 0, 40))
+
+local colorTab = createTab("Colors")
+addSlider(colorTab, "Red", "ColorR", 0, 255)
+addSlider(colorTab, "Green", "ColorG", 0, 255)
+addSlider(colorTab, "Blue", "ColorB", 0, 255)
+
+local setTab = createTab("Config")
+addBtn(setTab, "SAVE CONFIG", SaveConfig, Color3.fromRGB(50, 50, 55))
+addBtn(setTab, "LOAD CONFIG", LoadConfig, Color3.fromRGB(50, 50, 55))
+
+-- [[ ЛОГИКА ЦИКЛА ]]
+local Boxes = {}
+local function GetBox(player)
+    if Boxes[player] then return Boxes[player] end
+    local b = Drawing.new("Square")
+    b.Thickness = 1; b.Filled = false; b.Transparency = 1; b.Visible = false
+    Boxes[player] = b
+    return b
+end
+
 local FOV_Circle = Drawing.new("Circle"); FOV_Circle.Thickness = 1; FOV_Circle.NumSides = 60
 
+local hooking = false
+local hookTarget = nil
+
 RunService.RenderStepped:Connect(function()
-    STATE.CurrentColor = Color3.fromRGB(STATE.ColorR, STATE.ColorG, STATE.ColorB)
-    main.BackgroundColor3 = STATE.MenuBg; lineHeader.BackgroundColor3 = STATE.CurrentColor; title.TextColor3 = STATE.CurrentColor
-    thud_line.BackgroundColor3 = STATE.CurrentColor; thud_hp_fill.BackgroundColor3 = STATE.CurrentColor
+    STATE.AccentColor = Color3.fromRGB(STATE.ColorR, STATE.ColorG, STATE.ColorB)
+    local t = Themes[STATE.CurrentTheme] or {Grad1 = Color3.new(0,0,0), Grad2 = Color3.new(0.1,0.1,0.1)}
     
-    for _, item in pairs(UI_Elements.Toggles) do if item.key == "AlwaysOn" or STATE[item.key] then item.btn.BackgroundColor3 = STATE.CurrentColor; item.btn.BackgroundTransparency = 0 else item.btn.BackgroundTransparency = 1 end end
-    FOV_Circle.Visible = (STATE.AimEnabled and STATE.Visible); FOV_Circle.Radius = STATE.AimFOV; FOV_Circle.Position = UIS:GetMouseLocation(); FOV_Circle.Color = STATE.CurrentColor
+    mainStroke.Color = STATE.AccentColor
+    mainGrad.Color = ColorSequence.new(t.Grad1, t.Grad2)
+    
+    for k, v in pairs(toggles) do
+        v.BackgroundTransparency = STATE[k] and 0 or 1
+        v.BackgroundColor3 = STATE.AccentColor
+    end
+
+    for _, v in pairs(sg:GetDescendants()) do
+        if v.Name == "Fill" or v.Name == "Accent" then v.BackgroundColor3 = STATE.AccentColor end
+    end
 
     local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); local hum = char and char:FindFirstChild("Humanoid")
     local mouseLoc = UIS:GetMouseLocation()
 
-    -- SILENT SPIN (ФИЗИЧЕСКИЙ)
-    if STATE.SpinBot and hrp and hum then
-        bAV.Parent = hrp
-        bAV.AngularVelocity = Vector3.new(0, STATE.SpinSpeed, 0)
-        hum.AutoRotate = false
-        hum.PlatformStand = true 
-        if (Camera.Focus.p - Camera.CoordinateFrame.p).Magnitude < 1 then lp.CameraMode = Enum.CameraMode.Classic end
-    elseif hum then
-        bAV.Parent = nil
-        hum.AutoRotate = true
-        hum.PlatformStand = false
-    end
-
-    -- NOCLIP
-    if STATE.Noclip and char then
-        for _, v in pairs(char:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide = false end end
-    end
-
-    -- ПОИСК ЦЕЛИ
-    local aim_target = nil; local hud_p = nil; local shortest = STATE.AimFOV
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= lp and p.Character and p.Character:FindFirstChild("Head") and not IsTeammate(p) then
-            local head = p.Character.Head
-            if IsVisible(head) then
-                local pos, on = Camera:WorldToViewportPoint(head.Position)
-                if on then
-                    local d = (Vector2.new(pos.X, pos.Y) - mouseLoc).Magnitude
-                    if d < shortest then shortest = d; aim_target = head; hud_p = p end
-                end
-            end
+    -- HOOK LOGIC
+    if STATE.HookEnabled and hooking and hookTarget and hrp then
+        hookForce.Parent = hrp
+        local dir = (hookTarget - hrp.Position).Unit
+        if (hookTarget - hrp.Position).Magnitude > 7 then
+            hookForce.Velocity = dir * STATE.HookSpeed
+        else
+            hooking = false
+            hookForce.Parent = nil
         end
+    else
+        hookForce.Parent = nil
     end
-    STATE.TPBehindTarget = (STATE.TPBehindEnabled and hud_p) or nil
 
-    -- ТАРГЕТ ХАД
-    if STATE.TargetHUDEnabled and hud_p and hud_p.Character:FindFirstChild("Humanoid") then
-        local h = hud_p.Character.Humanoid
-        thud_name.Text = hud_p.Name; thud_hp_fill.Size = UDim2.new(math.clamp(h.Health/h.MaxHealth, 0, 1), 0, 1, 0); thud.Visible = true
-    else thud.Visible = false end
-
-    -- ЧАМСЫ (ФИКС: ОБНОВЛЕНИЕ КАЖДЫЙ КАДР)
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= lp and p.Character then
-            local highlight = p.Character:FindFirstChild("PloY_Visual")
-            if STATE.ChamsEsp or (STATE.TPBehindEnabled and p == STATE.TPBehindTarget) then
-                if not highlight then 
-                    highlight = Instance.new("Highlight", p.Character)
-                    highlight.Name = "PloY_Visual"
+   -- [[ OMNI-CONTROL BHOP ]]
+    if STATE.BhopEnabled and hum and hrp then
+        if UIS:IsKeyDown(Enum.KeyCode.Space) then
+            hum.Jump = true
+            local moveDir = hum.MoveDirection
+            
+            if hum.FloorMaterial == Enum.Material.Air then
+                lastGrounded = false
+                if moveDir.Magnitude > 0 then
+                    hrp.Velocity = Vector3.new(moveDir.X * STATE.BhopPower, hrp.Velocity.Y, moveDir.Z * STATE.BhopPower)
                 end
-                highlight.Enabled = true
-                highlight.FillColor = (p == STATE.TPBehindTarget) and STATE.TPColor or STATE.CurrentColor
-                highlight.OutlineColor = Color3.new(1,1,1)
-                highlight.FillTransparency = 0.5
-                highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
             else
-                if highlight then highlight:Destroy() end
+                if not lastGrounded then
+                    STATE.BhopPower = math.clamp(STATE.BhopPower + 3, 16, STATE.BhopMax)
+                    lastGrounded = true
+                end
+                if moveDir.Magnitude > 0 then
+                    hrp.Velocity = Vector3.new(moveDir.X * STATE.BhopPower, hrp.Velocity.Y, moveDir.Z * STATE.BhopPower)
+                end
             end
+        else
+            STATE.BhopPower = 16 
+            lastGrounded = true
         end
     end
 
-    -- СПИДХАК И ПОЛЕТ
-    if hrp and hum then
-        if STATE.SpeedEnabled and hum.MoveDirection.Magnitude > 0 then hrp.CFrame += (hum.MoveDirection * STATE.SpeedPower / 5) end
-        if STATE.FlyEnabled then
-            hrp.Velocity = Vector3.new(0, 0.1, 0)
-            local fDir = Vector3.new(0,0,0)
-            if UIS:IsKeyDown(Enum.KeyCode.W) then fDir += Camera.CFrame.LookVector end
-            if UIS:IsKeyDown(Enum.KeyCode.S) then fDir -= Camera.CFrame.LookVector end
-            if UIS:IsKeyDown(Enum.KeyCode.A) then fDir -= Camera.CFrame.RightVector end
-            if UIS:IsKeyDown(Enum.KeyCode.D) then fDir += Camera.CFrame.RightVector end
-            if fDir.Magnitude > 0 then hrp.CFrame += (fDir.Unit * (STATE.FlySpeed / 50)) end
-        end
+    -- TARGETING & ESP
+    local aim_target, hud_p, shortest = nil, nil, STATE.AimFOV
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= lp and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local root = p.Character.HumanoidRootPart
+            local head = p.Character:FindFirstChild("Head")
+            local pos, on = Camera:WorldToViewportPoint(root.Position)
+            
+            local box = GetBox(p)
+            if STATE.BoxEsp and on and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+                local sizeX = 2500 / pos.Z; local sizeY = 3800 / pos.Z
+                box.Size = Vector2.new(sizeX, sizeY)
+                box.Position = Vector2.new(pos.X - sizeX / 2, pos.Y - sizeY / 2)
+                box.Color = STATE.AccentColor; box.Visible = true
+            else box.Visible = false end
+
+            if STATE.ChamsEsp and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+                local h = p.Character:FindFirstChild("PloY_Highlight") or Instance.new("Highlight", p.Character)
+                h.Name = "PloY_Highlight"; h.FillColor = STATE.AccentColor; h.Enabled = true
+            elseif p.Character:FindFirstChild("PloY_Highlight") then
+                p.Character.PloY_Highlight.Enabled = false
+            end
+
+            if head and not IsTeammate(p) and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+                local hPos, hOn = Camera:WorldToViewportPoint(head.Position)
+                if hOn then
+                    local d = (Vector2.new(hPos.X, hPos.Y) - mouseLoc).Magnitude
+                    if d < shortest and IsVisible(head) then 
+                        shortest = d; aim_target = head; hud_p = p 
+                    end
+                end
+            end
+        elseif Boxes[p] then Boxes[p].Visible = false end
+    end
+    
+    if tick() - targetUpdateTick > 0.05 then
+        targetUpdateTick = tick()
+        STATE.TPBehindTarget = hud_p; STATE.LockedPart = aim_target
     end
 
-    -- АИМБОТ
-    if STATE.AimEnabled and aim_target and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-        local p = Camera:WorldToViewportPoint(aim_target.Position)
+    if STATE.TargetHUDEnabled and STATE.TPBehindTarget and STATE.TPBehindTarget.Character and STATE.TPBehindTarget.Character:FindFirstChild("Humanoid") then
+        local h = STATE.TPBehindTarget.Character.Humanoid
+        targetHud.Visible = true; targetName.Text = STATE.TPBehindTarget.Name
+        targetHPFill.Size = UDim2.new(math.clamp(h.Health/h.MaxHealth, 0, 1), 0, 1, 0)
+    else targetHud.Visible = false end
+
+    if STATE.AimEnabled and STATE.LockedPart and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+        local p = Camera:WorldToViewportPoint(STATE.LockedPart.Position)
         mousemoverel((p.X - mouseLoc.X)/STATE.AimSmooth, (p.Y - mouseLoc.Y)/STATE.AimSmooth)
     end
+
+    -- MOVE LOGIC (Fly, Speed, Spin, Noclip)
+    if hrp and hum then
+        if STATE.FlyEnabled then
+            local flyDir = Vector3.new(0,0,0)
+            if UIS:IsKeyDown(Enum.KeyCode.W) then flyDir += Camera.CFrame.LookVector end
+            if UIS:IsKeyDown(Enum.KeyCode.S) then flyDir -= Camera.CFrame.LookVector end
+            if UIS:IsKeyDown(Enum.KeyCode.A) then flyDir -= Camera.CFrame.RightVector end
+            if UIS:IsKeyDown(Enum.KeyCode.D) then flyDir += Camera.CFrame.RightVector end
+            if UIS:IsKeyDown(Enum.KeyCode.Space) then flyDir += Vector3.new(0,1,0) end
+            if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then flyDir -= Vector3.new(0,1,0) end
+            
+            hrp.Velocity = flyDir * STATE.FlySpeed
+            if flyDir.Magnitude == 0 then hrp.Velocity = Vector3.new(0,0,0) end
+        elseif STATE.SpeedEnabled and hum.MoveDirection.Magnitude > 0 then 
+            hrp.CFrame += (hum.MoveDirection * STATE.SpeedPower / 5) 
+        end
+        
+        if STATE.SpinBot then bAV.Parent = hrp; bAV.AngularVelocity = Vector3.new(0, STATE.SpinSpeed, 0) else bAV.Parent = nil end
+        if STATE.Noclip then for _, v in pairs(char:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide = false end end end
+    end
+    
+    FOV_Circle.Visible = (STATE.AimEnabled and STATE.Visible); FOV_Circle.Radius = STATE.AimFOV; FOV_Circle.Position = mouseLoc; FOV_Circle.Color = STATE.AccentColor
 end)
 
--- [[ КНОПКИ ]]
 UIS.InputBegan:Connect(function(i, g)
-    if not g then
-        if i.KeyCode == Enum.KeyCode[STATE.Bind_Menu] then 
-            STATE.Visible = not STATE.Visible; main.Visible = STATE.Visible
-        elseif i.KeyCode == Enum.KeyCode[STATE.TPBehindBind] and STATE.TPBehindEnabled and STATE.TPBehindTarget then
-            local tChar = STATE.TPBehindTarget.Character
-            if tChar and tChar:FindFirstChild("HumanoidRootPart") and lp.Character:FindFirstChild("HumanoidRootPart") then
-                lp.Character.HumanoidRootPart.CFrame = tChar.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
-            end
-        end
+    if not g and i.KeyCode == Enum.KeyCode[STATE.Bind_Menu] then STATE.Visible = not STATE.Visible; main.Visible = STATE.Visible end
+    if not g and i.KeyCode == Enum.KeyCode.E and STATE.TPBehindEnabled and STATE.TPBehindTarget and lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") then
+        lp.Character.HumanoidRootPart.CFrame = STATE.TPBehindTarget.Character.HumanoidRootPart.CFrame * CFrame.new(0,0,3)
+    end
+    if not g and i.KeyCode == Enum.KeyCode.Q and STATE.HookEnabled then 
+        local unitRay = Camera:ViewportPointToRay(UIS:GetMouseLocation().X, UIS:GetMouseLocation().Y)
+        local params = RaycastParams.new(); params.FilterType = Enum.RaycastFilterType.Exclude; params.FilterDescendantsInstances = {lp.Character}
+        local res = workspace:Raycast(unitRay.Origin, unitRay.Direction * 5000, params)
+        if res then hookTarget = res.Position; hooking = true end
     end
 end)
+
+UIS.InputEnded:Connect(function(i, g) 
+    if i.KeyCode == Enum.KeyCode.Q then 
+        hooking = false 
+    end 
+end)
+
+LoadConfig()
+pages.Aim.Visible = true
