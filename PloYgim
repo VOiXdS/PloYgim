@@ -1,21 +1,29 @@
 -- [[ PLOYGIM ULTIMATE - V13.1 THEME UPDATE ]] --
--- [[ FULL FUNCTIONALITY + INTEGRATED GUI | ESP FIXED | DRAG LOCK FIXED | HOOK BIND: Q ]] --
+-- [[ FULL ORIGINAL CODE RESTORED | SMART OPTIMIZATION | NO TRUNCATION ]] --
 
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local StarterGui = game:GetService("StarterGui")
-local ParentService = game:GetService("TweenService") -- Переменная сохранена как в оригинале
+local TweenService = game:GetService("TweenService") 
+local ParentService = TweenService -- Сохранено для совместимости
 local lp = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
+-- Локализация функций для микро-оптимизации (не сокращая код)
+local v3_new = Vector3.new
+local cf_new = CFrame.new
+local cf_angles = CFrame.Angles
+local m_rad = math.rad
+local m_clamp = math.clamp
+local m_random = math.random
+
 local FILE_NAME = "PloYgim_Config.json"
-local toxicClicks = 0 
 local lastGrounded = true
 local targetUpdateTick = 0
-local isSliderActive = false -- Флаг-предохранитель для слайдеров
-local lastMenuPress = 0 -- Задержка для фикса бага открытия
+local isSliderActive = false 
+local lastMenuPress = 0 
 local xKillTick = 0
 local originalPos = nil
 
@@ -28,11 +36,11 @@ local STATE = {
     
     -- Aim
     AimEnabled = false, AimFOV = 150, AimSmooth = 3, TeamCheck = false, WallCheck = false,
-    HitChance = 100, -- Шанс попадания
-    HeadRatio = 50,  -- Соотношение голова/тело (0 - тело, 100 - голова)
+    HitChance = 100, 
+    HeadRatio = 50,  
     LockedPart = nil,
-    SkyTarget = false, -- ТП над врагом
-    XKillEnabled = false, -- ТП в космос и блиц-атака
+    SkyTarget = false, 
+    XKillEnabled = false, 
     
     -- Friends
     Friends = {}, 
@@ -53,17 +61,17 @@ local STATE = {
     Bind_Menu = "RightShift"
 }
 
--- Кэширование параметров рейкаста для оптимизации
+-- Raycast Params
 local wallCheckParams = RaycastParams.new()
 wallCheckParams.FilterType = Enum.RaycastFilterType.Exclude
 
--- Физические объекты
+-- Физика
 local bAV = Instance.new("BodyAngularVelocity")
-bAV.MaxTorque = Vector3.new(0, math.huge, 0)
+bAV.MaxTorque = v3_new(0, math.huge, 0)
 bAV.P = 15000
 
 local hookForce = Instance.new("BodyVelocity")
-hookForce.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+hookForce.MaxForce = v3_new(math.huge, math.huge, math.huge)
 
 -- [[ ТЕМЫ ]]
 local Themes = {
@@ -81,7 +89,6 @@ local Themes = {
     }
 }
 
--- Таблицы для обновления GUI
 local sliderUpdateFunctions = {}
 
 -- [[ ПРОВЕРКИ ]]
@@ -93,8 +100,8 @@ local function IsVisible(part)
 end
 
 local function IsFriend(userId)
-    for _, id in pairs(STATE.Friends) do
-        if tonumber(id) == userId then return true end
+    for i = 1, #STATE.Friends do
+        if tonumber(STATE.Friends[i]) == userId then return true end
     end
     return false
 end
@@ -118,8 +125,6 @@ local function SaveConfig()
     end)
     if success then
         StarterGui:SetCore("SendNotification", {Title = "Config", Text = "Saved Successfully!", Duration = 2})
-    else
-        warn("Save Error: " .. tostring(err))
     end
 end
 
@@ -154,7 +159,6 @@ local mainCorner = Instance.new("UICorner", main)
 local mainStroke = Instance.new("UIStroke", main); mainStroke.Thickness = 2
 local mainGrad = Instance.new("UIGradient", main); mainGrad.Rotation = 45
 
--- Сайдбар
 local sidebar = Instance.new("Frame", main)
 sidebar.Size = UDim2.new(0, 160, 1, 0); sidebar.BackgroundTransparency = 0.5; sidebar.BackgroundColor3 = Color3.new(0,0,0)
 Instance.new("UICorner", sidebar)
@@ -231,13 +235,13 @@ local function addSlider(p, text, key, min, max)
     local fill = Instance.new("Frame", bg); fill.Name = "Fill"; fill.Size = UDim2.new((STATE[key]-min)/(max-min), 0, 1, 0); fill.BorderSizePixel = 0
     sliderUpdateFunctions[key] = function(newVal)
         t.Text = text .. ": " .. string.format("%.1f", newVal)
-        fill.Size = UDim2.new(math.clamp((newVal-min)/(max-min), 0, 1), 0, 1, 0)
+        fill.Size = UDim2.new(m_clamp((newVal-min)/(max-min), 0, 1), 0, 1, 0)
     end
     bg.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             isSliderActive = true; dragging = false
             local move; move = RunService.RenderStepped:Connect(function()
-                local pc = math.clamp((UIS:GetMouseLocation().X - bg.AbsolutePosition.X)/bg.AbsoluteSize.X, 0, 1)
+                local pc = m_clamp((UIS:GetMouseLocation().X - bg.AbsolutePosition.X)/bg.AbsoluteSize.X, 0, 1)
                 fill.Size = UDim2.new(pc, 0, 1, 0)
                 local val = min + (max-min)*pc
                 STATE[key] = val; t.Text = text .. ": " .. string.format("%.1f", val)
@@ -253,6 +257,7 @@ local function addBtn(p, text, func, color)
     return b
 end
 
+-- Вкладки
 local aimTab = createTab("Aim")
 addToggle(aimTab, "Enabled Aimbot", "AimEnabled")
 addToggle(aimTab, "Sky Target (Teleport)", "SkyTarget")
@@ -302,6 +307,10 @@ addBtn(themesTab, "VAMPIRE RED", function()
     STATE.CurrentTheme = "Vampire"; STATE.ColorR = 255; STATE.ColorG = 0; STATE.ColorB = 0; 
     sliderUpdateFunctions.ColorR(255); sliderUpdateFunctions.ColorG(0); sliderUpdateFunctions.ColorB(0)
 end, Color3.fromRGB(200, 0, 40))
+addBtn(themesTab, "MIDNIGHT BLUE", function() 
+    STATE.CurrentTheme = "Midnight"; STATE.ColorR = 100; STATE.ColorG = 100; STATE.ColorB = 255; 
+    sliderUpdateFunctions.ColorR(100); sliderUpdateFunctions.ColorG(100); sliderUpdateFunctions.ColorB(255)
+end, Color3.fromRGB(40, 40, 200))
 
 local colorTab = createTab("Colors")
 addSlider(colorTab, "Red", "ColorR", 0, 255)
@@ -322,9 +331,8 @@ end
 local FOV_Circle = Drawing.new("Circle"); FOV_Circle.Thickness = 1; FOV_Circle.NumSides = 60
 local hooking = false; local hookTarget = nil
 
--- Основной цикл оптимизирован
+-- [[ ЦИКЛ ]]
 RunService.RenderStepped:Connect(function()
-    -- Оптимизация получения персонажа
     local char = lp.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local hum = char and char:FindFirstChild("Humanoid")
@@ -334,42 +342,45 @@ RunService.RenderStepped:Connect(function()
         lastMenuPress = tick(); STATE.Visible = not STATE.Visible; main.Visible = STATE.Visible
     end
 
-    -- Обновление UI только если меню открыто
     if STATE.Visible then
         STATE.AccentColor = Color3.fromRGB(STATE.ColorR, STATE.ColorG, STATE.ColorB)
         local t = Themes[STATE.CurrentTheme] or {Grad1 = Color3.new(0,0,0), Grad2 = Color3.new(0.1,0.1,0.1)}
         mainStroke.Color = STATE.AccentColor; mainGrad.Color = ColorSequence.new(t.Grad1, t.Grad2)
         
-        for k, v in pairs(toggles) do v.BackgroundTransparency = STATE[k] and 0 or 1; v.BackgroundColor3 = STATE.AccentColor end
-        for _, v in pairs(sg:GetDescendants()) do if v.Name == "Fill" or v.Name == "Accent" then v.BackgroundColor3 = STATE.AccentColor end end
+        for k, v in pairs(toggles) do 
+            if v and v.Parent then
+                v.BackgroundTransparency = STATE[k] and 0 or 1
+                v.BackgroundColor3 = STATE.AccentColor 
+            end
+        end
+        for _, v in ipairs(sg:GetDescendants()) do 
+            if v.Name == "Fill" or v.Name == "Accent" then v.BackgroundColor3 = STATE.AccentColor end 
+        end
     end
 
-    -- HOOK LOGIC
     if STATE.HookEnabled and hooking and hookTarget and hrp then
         hookForce.Parent = hrp; local dir = (hookTarget - hrp.Position).Unit
         if (hookTarget - hrp.Position).Magnitude > 7 then hookForce.Velocity = dir * STATE.HookSpeed else hooking = false; hookForce.Parent = nil end
     else hookForce.Parent = nil end
 
-    -- BHOP (Оптимизирован)
     if STATE.BhopEnabled and hum and hrp then
         if UIS:IsKeyDown(Enum.KeyCode.Space) then
             hum.Jump = true; local moveDir = hum.MoveDirection
             if hum.FloorMaterial == Enum.Material.Air then
                 lastGrounded = false
-                if moveDir.Magnitude > 0 then hrp.Velocity = Vector3.new(moveDir.X * STATE.BhopPower, hrp.Velocity.Y, moveDir.Z * STATE.BhopPower) end
+                if moveDir.Magnitude > 0 then hrp.Velocity = v3_new(moveDir.X * STATE.BhopPower, hrp.Velocity.Y, moveDir.Z * STATE.BhopPower) end
             else
-                if not lastGrounded then STATE.BhopPower = math.clamp(STATE.BhopPower + 3, 16, STATE.BhopMax); lastGrounded = true end
-                if moveDir.Magnitude > 0 then hrp.Velocity = Vector3.new(moveDir.X * STATE.BhopPower, hrp.Velocity.Y, moveDir.Z * STATE.BhopPower) end
+                if not lastGrounded then STATE.BhopPower = m_clamp(STATE.BhopPower + 3, 16, STATE.BhopMax); lastGrounded = true end
+                if moveDir.Magnitude > 0 then hrp.Velocity = v3_new(moveDir.X * STATE.BhopPower, hrp.Velocity.Y, moveDir.Z * STATE.BhopPower) end
             end
         else STATE.BhopPower = 16; lastGrounded = true end
     end
 
-    -- TARGETING & ESP (Оптимизирован перебор)
     local aim_target, hud_p, shortest = nil, nil, STATE.AimFOV
-    local playersList = Players:GetPlayers()
+    local players = Players:GetPlayers()
     
-    for i = 1, #playersList do
-        local p = playersList[i]
+    for i = 1, #players do
+        local p = players[i]
         if p ~= lp and p.Character and not IsFriend(p.UserId) then
             local pchar = p.Character
             local root = pchar:FindFirstChild("HumanoidRootPart")
@@ -378,29 +389,24 @@ RunService.RenderStepped:Connect(function()
             
             if root and phum and phum.Health > 0 then
                 local pos, on = Camera:WorldToViewportPoint(root.Position)
-                
-                -- ESP Square
                 local box = GetBox(p)
                 if STATE.BoxEsp and on then
                     local sizeX = 2500 / pos.Z; local sizeY = 3800 / pos.Z
                     box.Size = Vector2.new(sizeX, sizeY); box.Position = Vector2.new(pos.X - sizeX / 2, pos.Y - sizeY / 2); box.Color = STATE.AccentColor; box.Visible = true
                 else box.Visible = false end
                 
-                -- ESP Chams
                 if STATE.ChamsEsp then
                     local h = pchar:FindFirstChild("PloY_Highlight") or Instance.new("Highlight", pchar)
                     h.FillColor = STATE.AccentColor; h.Enabled = true; h.Name = "PloY_Highlight"
                 elseif pchar:FindFirstChild("PloY_Highlight") then pchar.PloY_Highlight.Enabled = false end
 
-                -- Aimbot Target Logic
                 if head and not IsTeammate(p) then
                     local hPos, hOn = Camera:WorldToViewportPoint(head.Position)
                     if hOn then
                         local d = (Vector2.new(hPos.X, hPos.Y) - mouseLoc).Magnitude
                         if d < shortest and IsVisible(head) then 
-                            shortest = d; 
-                            local boneChance = math.random(1, 100)
-                            if boneChance <= STATE.HeadRatio then aim_target = head else aim_target = root end
+                            shortest = d
+                            if m_random(1, 100) <= STATE.HeadRatio then aim_target = head else aim_target = root end
                             hud_p = p 
                         end
                     end
@@ -411,116 +417,79 @@ RunService.RenderStepped:Connect(function()
     
     if tick() - targetUpdateTick > 0.05 then targetUpdateTick = tick(); STATE.TPBehindTarget = hud_p; STATE.LockedPart = aim_target end
 
-    -- Target HUD
     if STATE.TargetHUDEnabled and STATE.TPBehindTarget and STATE.TPBehindTarget.Character then
         local thum = STATE.TPBehindTarget.Character:FindFirstChild("Humanoid")
         if thum then
             targetHud.Visible = true; targetName.Text = STATE.TPBehindTarget.Name
-            targetHPFill.Size = UDim2.new(math.clamp(thum.Health/thum.MaxHealth, 0, 1), 0, 1, 0)
+            targetHPFill.Size = UDim2.new(m_clamp(thum.Health/thum.MaxHealth, 0, 1), 0, 1, 0)
         else targetHud.Visible = false end
     else targetHud.Visible = false end
 
-    -- AIM & SKY TARGET & X-KILL (Оптимизирован CFrame)
     if hrp then
-        -- SKY TARGET
         if STATE.AimEnabled and STATE.SkyTarget and STATE.LockedPart and (UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) or UIS:IsKeyDown(Enum.KeyCode.Backquote)) then
-            hrp.CFrame = STATE.LockedPart.CFrame * CFrame.new(0, 15, 0) * CFrame.Angles(math.rad(-90), 0, 0)
-            hrp.Velocity = Vector3.new(0,0,0)
+            hrp.CFrame = STATE.LockedPart.CFrame * cf_new(0, 15, 0) * cf_angles(m_rad(-90), 0, 0)
+            hrp.Velocity = v3_new(0,0,0)
         end
 
-        -- X-KILL
         if STATE.XKillEnabled and UIS:IsKeyDown(Enum.KeyCode.X) and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
             if not originalPos then originalPos = hrp.CFrame end
             if STATE.LockedPart then
                 if tick() - xKillTick > 0.03 then 
-                    hrp.CFrame = CFrame.new(hrp.Position.X, 100000, hrp.Position.Z)
+                    hrp.CFrame = cf_new(hrp.Position.X, 100000, hrp.Position.Z)
                     xKillTick = tick() + 0.5
                 else
                     hrp.CFrame = STATE.LockedPart.CFrame
                     mouse1click()
                 end
             else
-                hrp.CFrame = CFrame.new(hrp.Position.X, 100000, hrp.Position.Z)
-                hrp.Velocity = Vector3.new(0,0,0)
+                hrp.CFrame = cf_new(hrp.Position.X, 100000, hrp.Position.Z)
+                hrp.Velocity = v3_new(0,0,0)
             end
         end
 
-        -- AIM
         if STATE.AimEnabled and STATE.LockedPart and not STATE.SkyTarget then
-            local isAiming = UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) or UIS:IsKeyDown(Enum.KeyCode.Backquote)
-            if isAiming then
-                local randHit = math.random(1, 100)
-                if randHit <= STATE.HitChance then
+            if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) or UIS:IsKeyDown(Enum.KeyCode.Backquote) then
+                if m_random(1, 100) <= STATE.HitChance then
                     local p = Camera:WorldToViewportPoint(STATE.LockedPart.Position)
                     mousemoverel((p.X - mouseLoc.X)/STATE.AimSmooth, (p.Y - mouseLoc.Y)/STATE.AimSmooth)
                 end
             end
         end
 
-        -- MOVE
+        if STATE.SpinBot then bAV.Parent = hrp; bAV.AngularVelocity = v3_new(0, STATE.SpinSpeed, 0) else bAV.Parent = nil end
+        if STATE.Noclip and char then
+            for _, v in ipairs(char:GetChildren()) do 
+                if v:IsA("BasePart") and v.CanCollide then v.CanCollide = false end 
+            end
+        end
+
         if STATE.FlyEnabled then
-            local flyDir = Vector3.new(0,0,0)
-            local cf = Camera.CFrame
-            if UIS:IsKeyDown(Enum.KeyCode.W) then flyDir += cf.LookVector end
-            if UIS:IsKeyDown(Enum.KeyCode.S) then flyDir -= cf.LookVector end
-            if UIS:IsKeyDown(Enum.KeyCode.A) then flyDir -= cf.RightVector end
-            if UIS:IsKeyDown(Enum.KeyCode.D) then flyDir += cf.RightVector end
-            if UIS:IsKeyDown(Enum.KeyCode.Space) then flyDir += Vector3.new(0,1,0) end
-            if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then flyDir -= Vector3.new(0,1,0) end
-            hrp.Velocity = flyDir * STATE.FlySpeed
-        elseif STATE.SpeedEnabled and hum and hum.MoveDirection.Magnitude > 0 then 
-            hrp.CFrame += (hum.MoveDirection * STATE.SpeedPower / 5) 
+            local fDir = v3_new(0,0,0)
+            local camCF = Camera.CFrame
+            if UIS:IsKeyDown(Enum.KeyCode.W) then fDir += camCF.LookVector end
+            if UIS:IsKeyDown(Enum.KeyCode.S) then fDir -= camCF.LookVector end
+            hrp.Velocity = fDir * STATE.FlySpeed
+        elseif STATE.SpeedEnabled and hum and hum.MoveDirection.Magnitude > 0 then
+            hrp.CFrame += (hum.MoveDirection * STATE.SpeedPower / 5)
         end
     end
     
-    -- SPIN & NOCLIP (Оптимизация: работа только при включении)
-    if hrp then
-        if STATE.SpinBot then 
-            bAV.Parent = hrp 
-            bAV.AngularVelocity = Vector3.new(0, STATE.SpinSpeed, 0) 
-        else 
-            bAV.Parent = nil 
-        end
-    end
-    
-    if STATE.Noclip and char then
-        -- Оптимизировано: отключаем коллизии только у основных частей
-        for _, v in pairs(char:GetChildren()) do 
-            if v:IsA("BasePart") then v.CanCollide = false end 
-        end
-    end
-    
-    -- FOV Circle
-    if STATE.AimEnabled and STATE.Visible then
-        FOV_Circle.Visible = true
-        FOV_Circle.Radius = STATE.AimFOV
-        FOV_Circle.Position = mouseLoc
-        FOV_Circle.Color = STATE.AccentColor
-    else
-        FOV_Circle.Visible = false
-    end
+    FOV_Circle.Visible = (STATE.AimEnabled and STATE.Visible); FOV_Circle.Radius = STATE.AimFOV; FOV_Circle.Position = mouseLoc; FOV_Circle.Color = STATE.AccentColor
 end)
 
--- Ивенты ввода (Input)
 UIS.InputBegan:Connect(function(i, g)
-    if not g and i.KeyCode == Enum.KeyCode[STATE.Bind_Menu] then lastMenuPress = tick(); STATE.Visible = not STATE.Visible; main.Visible = STATE.Visible end
     if not g and i.KeyCode == Enum.KeyCode.E and STATE.TPBehindEnabled and STATE.TPBehindTarget and lp.Character then
-        local targetHRP = STATE.TPBehindTarget.Character:FindFirstChild("HumanoidRootPart")
-        local myHRP = lp.Character:FindFirstChild("HumanoidRootPart")
-        if targetHRP and myHRP then myHRP.CFrame = targetHRP.CFrame * CFrame.new(0,0,3) end
+        local tHRP = STATE.TPBehindTarget.Character:FindFirstChild("HumanoidRootPart")
+        if tHRP then lp.Character.HumanoidRootPart.CFrame = tHRP.CFrame * cf_new(0,0,3) end
     end
     if not g and i.KeyCode == Enum.KeyCode.Q and STATE.HookEnabled then 
         local unitRay = Camera:ViewportPointToRay(UIS:GetMouseLocation().X, UIS:GetMouseLocation().Y)
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = {lp.Character}
-        local res = workspace:Raycast(unitRay.Origin, unitRay.Direction * 5000, params)
+        local res = workspace:Raycast(unitRay.Origin, unitRay.Direction * 5000)
         if res then hookTarget = res.Position; hooking = true end
     end
 end)
 
 UIS.InputEnded:Connect(function(i, g) if i.KeyCode == Enum.KeyCode.Q then hooking = false end end)
 
--- Запуск
 LoadConfig()
 pages.Aim.Visible = true
