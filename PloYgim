@@ -16,6 +16,8 @@ local lastGrounded = true
 local targetUpdateTick = 0
 local isSliderActive = false -- Флаг-предохранитель для слайдеров
 local lastMenuPress = 0 -- Задержка для фикса бага открытия
+local xKillTick = 0
+local originalPos = nil
 
 -- [[ ГЛОБАЛЬНОЕ СОСТОЯНИЕ ]]
 local STATE = {
@@ -29,6 +31,8 @@ local STATE = {
     HitChance = 100, -- Шанс попадания
     HeadRatio = 50,  -- Соотношение голова/тело (0 - тело, 100 - голова)
     LockedPart = nil,
+    SkyTarget = false, -- ТП над врагом
+    XKillEnabled = false, -- ТП в космос и блиц-атака
     
     -- Friends
     Friends = {}, 
@@ -103,7 +107,6 @@ end
 local function SaveConfig()
     local data = {}
     for k, v in pairs(STATE) do
-        -- Добавлена поддержка сохранения таблицы друзей (Friends)
         if type(v) == "boolean" or type(v) == "number" or type(v) == "string" or type(v) == "table" then 
             data[k] = v 
         end
@@ -125,7 +128,6 @@ local function LoadConfig()
             for k, v in pairs(decoded) do 
                 if STATE[k] ~= nil then 
                     STATE[k] = v 
-                    -- Обновляем визуальную часть слайдеров при загрузке
                     if sliderUpdateFunctions[k] then
                         sliderUpdateFunctions[k](v)
                     end
@@ -155,7 +157,6 @@ local sidebar = Instance.new("Frame", main)
 sidebar.Size = UDim2.new(0, 160, 1, 0); sidebar.BackgroundTransparency = 0.5; sidebar.BackgroundColor3 = Color3.new(0,0,0)
 Instance.new("UICorner", sidebar)
 
--- ИСПРАВЛЕННЫЙ ДРАГ
 local dragging, dragStart, startPos
 sidebar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 and not isSliderActive then
@@ -183,7 +184,6 @@ Instance.new("UIListLayout", tabHold).Padding = UDim.new(0, 5)
 local content = Instance.new("Frame", main)
 content.Size = UDim2.new(1, -170, 1, -20); content.Position = UDim2.new(0, 165, 0, 10); content.BackgroundTransparency = 1
 
--- TARGET HUD
 local function MakeHUD(name, size, pos)
     local f = Instance.new("Frame", sg); f.Name = name; f.Size = size; f.Position = pos; f.BackgroundColor3 = Color3.fromRGB(15,15,17)
     Instance.new("UICorner", f); local s = Instance.new("UIStroke", f); s.Thickness = 1; s.Color = Color3.fromRGB(50,50,50)
@@ -196,7 +196,6 @@ local targetName = Instance.new("TextLabel", targetHud); targetName.Size = UDim2
 local targetHPBg = Instance.new("Frame", targetHud); targetHPBg.Size = UDim2.new(1, -16, 0, 4); targetHPBg.Position = UDim2.new(0, 8, 0, 35); targetHPBg.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
 local targetHPFill = Instance.new("Frame", targetHPBg); targetHPFill.Name = "Fill"; targetHPFill.Size = UDim2.new(1, 0, 1, 0); targetHPFill.BorderSizePixel = 0
 
--- Билдер вкладок
 local pages = {}
 local toggles = {}
 
@@ -204,7 +203,6 @@ local function createTab(name)
     local p = Instance.new("ScrollingFrame", content); p.Size = UDim2.new(1, 0, 1, 0); p.BackgroundTransparency = 1; p.Visible = false; p.ScrollBarThickness = 2
     Instance.new("UIListLayout", p).Padding = UDim.new(0, 10)
     pages[name] = p
-    
     local b = Instance.new("TextButton", tabHold); b.Size = UDim2.new(1, -10, 0, 35); b.Text = name; b.Font = "GothamMedium"; b.TextColor3 = Color3.fromRGB(180, 180, 180); b.BackgroundTransparency = 1; b.TextSize = 14
     b.MouseButton1Click:Connect(function()
         for _, v in pairs(pages) do v.Visible = false end
@@ -220,42 +218,29 @@ local function addToggle(p, text, key)
     local ind = Instance.new("Frame", b); ind.Size = UDim2.new(0, 15, 0, 15); ind.Position = UDim2.new(1, -25, 0.5, -7); ind.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
     Instance.new("UICorner", ind)
     local fill = Instance.new("Frame", ind); fill.Name = "Fill"; fill.Size = UDim2.new(1, -4, 1, -4); fill.Position = UDim2.new(0, 2, 0, 2); fill.BackgroundTransparency = 1; Instance.new("UICorner", fill)
-    
-    b.MouseButton1Click:Connect(function()
-        STATE[key] = not STATE[key]
-    end)
+    b.MouseButton1Click:Connect(function() STATE[key] = not STATE[key] end)
     toggles[key] = fill
 end
 
--- ИСПРАВЛЕННЫЙ СЛАЙДЕР С ПОДДЕРЖКОЙ ОБНОВЛЕНИЯ ИЗ КОНФИГА
 local function addSlider(p, text, key, min, max)
     local f = Instance.new("Frame", p); f.Size = UDim2.new(1, -10, 0, 45); f.BackgroundTransparency = 1
     local t = Instance.new("TextLabel", f); t.Size = UDim2.new(1, 0, 0, 20); t.Text = text .. ": " .. string.format("%.1f", STATE[key]); t.TextColor3 = Color3.new(0.7,0.7,0.7); t.Font = "Gotham"; t.TextSize = 11; t.BackgroundTransparency = 1
     local bg = Instance.new("Frame", f); bg.Size = UDim2.new(1, -20, 0, 4); bg.Position = UDim2.new(0, 10, 0, 30); bg.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
     local fill = Instance.new("Frame", bg); fill.Name = "Fill"; fill.Size = UDim2.new((STATE[key]-min)/(max-min), 0, 1, 0); fill.BorderSizePixel = 0
-    
-    -- Функция для внешнего обновления слайдера (при загрузке конфига)
     sliderUpdateFunctions[key] = function(newVal)
         t.Text = text .. ": " .. string.format("%.1f", newVal)
         fill.Size = UDim2.new(math.clamp((newVal-min)/(max-min), 0, 1), 0, 1, 0)
     end
-
     bg.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            isSliderActive = true -- Блокировка драга
-            dragging = false -- Остановка текущего драга
+            isSliderActive = true; dragging = false
             local move; move = RunService.RenderStepped:Connect(function()
                 local pc = math.clamp((UIS:GetMouseLocation().X - bg.AbsolutePosition.X)/bg.AbsoluteSize.X, 0, 1)
                 fill.Size = UDim2.new(pc, 0, 1, 0)
                 local val = min + (max-min)*pc
                 STATE[key] = val; t.Text = text .. ": " .. string.format("%.1f", val)
             end)
-            UIS.InputEnded:Connect(function(i2) 
-                if i2.UserInputType == Enum.UserInputType.MouseButton1 then 
-                    move:Disconnect()
-                    isSliderActive = false -- Снятие блокировки
-                end 
-            end)
+            UIS.InputEnded:Connect(function(i2) if i2.UserInputType == Enum.UserInputType.MouseButton1 then move:Disconnect(); isSliderActive = false end end)
         end
     end)
 end
@@ -266,9 +251,10 @@ local function addBtn(p, text, func, color)
     return b
 end
 
--- Вкладки
 local aimTab = createTab("Aim")
 addToggle(aimTab, "Enabled Aimbot", "AimEnabled")
+addToggle(aimTab, "Sky Target (Teleport)", "SkyTarget")
+addToggle(aimTab, "X-Kill (X + PKM)", "XKillEnabled")
 addToggle(aimTab, "Team Check", "TeamCheck")
 addToggle(aimTab, "Wall Check", "WallCheck")
 addSlider(aimTab, "FOV Radius", "AimFOV", 10, 800)
@@ -324,125 +310,73 @@ local setTab = createTab("Config")
 addBtn(setTab, "SAVE CONFIG", SaveConfig, Color3.fromRGB(50, 50, 55))
 addBtn(setTab, "LOAD CONFIG", LoadConfig, Color3.fromRGB(50, 50, 55))
 
--- [[ ЛОГИКА ЦИКЛА ]]
 local Boxes = {}
 local function GetBox(player)
     if Boxes[player] then return Boxes[player] end
-    local b = Drawing.new("Square")
-    b.Thickness = 1; b.Filled = false; b.Transparency = 1; b.Visible = false
-    Boxes[player] = b
-    return b
+    local b = Drawing.new("Square"); b.Thickness = 1; b.Filled = false; b.Transparency = 1; b.Visible = false
+    Boxes[player] = b; return b
 end
 
 local FOV_Circle = Drawing.new("Circle"); FOV_Circle.Thickness = 1; FOV_Circle.NumSides = 60
-
-local hooking = false
-local hookTarget = nil
+local hooking = false; local hookTarget = nil
 
 RunService.RenderStepped:Connect(function()
-    -- ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА ОТКРЫТИЯ МЕНЮ (ФИКС БАГА)
     if UIS:IsKeyDown(Enum.KeyCode[STATE.Bind_Menu]) and tick() - lastMenuPress > 0.3 then
-        lastMenuPress = tick()
-        STATE.Visible = not STATE.Visible
-        main.Visible = STATE.Visible
+        lastMenuPress = tick(); STATE.Visible = not STATE.Visible; main.Visible = STATE.Visible
     end
 
     STATE.AccentColor = Color3.fromRGB(STATE.ColorR, STATE.ColorG, STATE.ColorB)
     local t = Themes[STATE.CurrentTheme] or {Grad1 = Color3.new(0,0,0), Grad2 = Color3.new(0.1,0.1,0.1)}
+    mainStroke.Color = STATE.AccentColor; mainGrad.Color = ColorSequence.new(t.Grad1, t.Grad2)
     
-    mainStroke.Color = STATE.AccentColor
-    mainGrad.Color = ColorSequence.new(t.Grad1, t.Grad2)
-    
-    for k, v in pairs(toggles) do
-        v.BackgroundTransparency = STATE[k] and 0 or 1
-        v.BackgroundColor3 = STATE.AccentColor
-    end
-
-    for _, v in pairs(sg:GetDescendants()) do
-        if v.Name == "Fill" or v.Name == "Accent" then v.BackgroundColor3 = STATE.AccentColor end
-    end
+    for k, v in pairs(toggles) do v.BackgroundTransparency = STATE[k] and 0 or 1; v.BackgroundColor3 = STATE.AccentColor end
+    for _, v in pairs(sg:GetDescendants()) do if v.Name == "Fill" or v.Name == "Accent" then v.BackgroundColor3 = STATE.AccentColor end end
 
     local char = lp.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart"); local hum = char and char:FindFirstChild("Humanoid")
     local mouseLoc = UIS:GetMouseLocation()
 
     -- HOOK LOGIC
     if STATE.HookEnabled and hooking and hookTarget and hrp then
-        hookForce.Parent = hrp
-        local dir = (hookTarget - hrp.Position).Unit
-        if (hookTarget - hrp.Position).Magnitude > 7 then
-            hookForce.Velocity = dir * STATE.HookSpeed
-        else
-            hooking = false
-            hookForce.Parent = nil
-        end
-    else
-        hookForce.Parent = nil
-    end
+        hookForce.Parent = hrp; local dir = (hookTarget - hrp.Position).Unit
+        if (hookTarget - hrp.Position).Magnitude > 7 then hookForce.Velocity = dir * STATE.HookSpeed else hooking = false; hookForce.Parent = nil end
+    else hookForce.Parent = nil end
 
-   -- [[ OMNI-CONTROL BHOP ]]
+    -- BHOP
     if STATE.BhopEnabled and hum and hrp then
         if UIS:IsKeyDown(Enum.KeyCode.Space) then
-            hum.Jump = true
-            local moveDir = hum.MoveDirection
-            
+            hum.Jump = true; local moveDir = hum.MoveDirection
             if hum.FloorMaterial == Enum.Material.Air then
                 lastGrounded = false
-                if moveDir.Magnitude > 0 then
-                    hrp.Velocity = Vector3.new(moveDir.X * STATE.BhopPower, hrp.Velocity.Y, moveDir.Z * STATE.BhopPower)
-                end
+                if moveDir.Magnitude > 0 then hrp.Velocity = Vector3.new(moveDir.X * STATE.BhopPower, hrp.Velocity.Y, moveDir.Z * STATE.BhopPower) end
             else
-                if not lastGrounded then
-                    STATE.BhopPower = math.clamp(STATE.BhopPower + 3, 16, STATE.BhopMax)
-                    lastGrounded = true
-                end
-                if moveDir.Magnitude > 0 then
-                    hrp.Velocity = Vector3.new(moveDir.X * STATE.BhopPower, hrp.Velocity.Y, moveDir.Z * STATE.BhopPower)
-                end
+                if not lastGrounded then STATE.BhopPower = math.clamp(STATE.BhopPower + 3, 16, STATE.BhopMax); lastGrounded = true end
+                if moveDir.Magnitude > 0 then hrp.Velocity = Vector3.new(moveDir.X * STATE.BhopPower, hrp.Velocity.Y, moveDir.Z * STATE.BhopPower) end
             end
-        else
-            STATE.BhopPower = 16 
-            lastGrounded = true
-        end
+        else STATE.BhopPower = 16; lastGrounded = true end
     end
 
-    -- TARGETING & ESP
+    -- TARGETING
     local aim_target, hud_p, shortest = nil, nil, STATE.AimFOV
     for _, p in pairs(Players:GetPlayers()) do
-        if p ~= lp and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-            local root = p.Character.HumanoidRootPart
-            local head = p.Character:FindFirstChild("Head")
+        if p ~= lp and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and not IsFriend(p.UserId) then
+            local root = p.Character.HumanoidRootPart; local head = p.Character:FindFirstChild("Head")
             local pos, on = Camera:WorldToViewportPoint(root.Position)
-            
             local box = GetBox(p)
             if STATE.BoxEsp and on and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
                 local sizeX = 2500 / pos.Z; local sizeY = 3800 / pos.Z
-                box.Size = Vector2.new(sizeX, sizeY)
-                box.Position = Vector2.new(pos.X - sizeX / 2, pos.Y - sizeY / 2)
-                box.Color = STATE.AccentColor; box.Visible = true
+                box.Size = Vector2.new(sizeX, sizeY); box.Position = Vector2.new(pos.X - sizeX / 2, pos.Y - sizeY / 2); box.Color = STATE.AccentColor; box.Visible = true
             else box.Visible = false end
-
             if STATE.ChamsEsp and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
                 local h = p.Character:FindFirstChild("PloY_Highlight") or Instance.new("Highlight", p.Character)
-                h.Name = "PloY_Highlight"; h.FillColor = STATE.AccentColor; h.Enabled = true
-            elseif p.Character:FindFirstChild("PloY_Highlight") then
-                p.Character.PloY_Highlight.Enabled = false
-            end
+                h.FillColor = STATE.AccentColor; h.Enabled = true
+            elseif p.Character:FindFirstChild("PloY_Highlight") then p.Character.PloY_Highlight.Enabled = false end
 
-            if head and not IsTeammate(p) and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+            if head and not IsTeammate(p) and p.Character.Humanoid.Health > 0 then
                 local hPos, hOn = Camera:WorldToViewportPoint(head.Position)
                 if hOn then
                     local d = (Vector2.new(hPos.X, hPos.Y) - mouseLoc).Magnitude
-                    if d < shortest and IsVisible(head) then 
-                        shortest = d; 
-                        
-                        -- ЛОГИКА ВЫБОРА КОСТИ (HEAD/BODY)
-                        local boneChance = math.random(1, 100)
-                        if boneChance <= STATE.HeadRatio then
-                            aim_target = head
-                        else
-                            aim_target = root
-                        end
-                        
+                    if d < shortest and IsVisible(head) then shortest = d; local boneChance = math.random(1, 100)
+                        if boneChance <= STATE.HeadRatio then aim_target = head else aim_target = root end
                         hud_p = p 
                     end
                 end
@@ -450,31 +384,54 @@ RunService.RenderStepped:Connect(function()
         elseif Boxes[p] then Boxes[p].Visible = false end
     end
     
-    if tick() - targetUpdateTick > 0.05 then
-        targetUpdateTick = tick()
-        STATE.TPBehindTarget = hud_p; STATE.LockedPart = aim_target
-    end
+    if tick() - targetUpdateTick > 0.05 then targetUpdateTick = tick(); STATE.TPBehindTarget = hud_p; STATE.LockedPart = aim_target end
 
     if STATE.TargetHUDEnabled and STATE.TPBehindTarget and STATE.TPBehindTarget.Character and STATE.TPBehindTarget.Character:FindFirstChild("Humanoid") then
-        local h = STATE.TPBehindTarget.Character.Humanoid
-        targetHud.Visible = true; targetName.Text = STATE.TPBehindTarget.Name
+        local h = STATE.TPBehindTarget.Character.Humanoid; targetHud.Visible = true; targetName.Text = STATE.TPBehindTarget.Name
         targetHPFill.Size = UDim2.new(math.clamp(h.Health/h.MaxHealth, 0, 1), 0, 1, 0)
     else targetHud.Visible = false end
 
-    -- ЛОГИКА AIMBOT С УЧЕТОМ HIT CHANCE (ПЕРЕБИНД С КОЛЕСИКА НА Ё / BACKQUOTE)
-    if STATE.AimEnabled and STATE.LockedPart then
-        local isAiming = UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) or UIS:IsKeyDown(Enum.KeyCode.Backquote)
-        if isAiming then
-            local randHit = math.random(1, 100)
-            if randHit <= STATE.HitChance then
-                local p = Camera:WorldToViewportPoint(STATE.LockedPart.Position)
-                mousemoverel((p.X - mouseLoc.X)/STATE.AimSmooth, (p.Y - mouseLoc.Y)/STATE.AimSmooth)
+    -- AIM & SKY TARGET & X-KILL
+    if hrp then
+        -- SKY TARGET LOGIC
+        if STATE.AimEnabled and STATE.SkyTarget and STATE.LockedPart and (UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) or UIS:IsKeyDown(Enum.KeyCode.Backquote)) then
+            hrp.CFrame = STATE.LockedPart.CFrame * CFrame.new(0, 15, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+            hrp.Velocity = Vector3.new(0,0,0)
+        end
+
+        -- X-KILL LOGIC (100000m + Blitz)
+        if STATE.XKillEnabled and UIS:IsKeyDown(Enum.KeyCode.X) and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+            if not originalPos then originalPos = hrp.CFrame end
+            
+            if STATE.LockedPart then
+                if tick() - xKillTick > 0.03 then -- 30ms внутри
+                    hrp.CFrame = CFrame.new(hrp.Position.X, 100000, hrp.Position.Z)
+                    xKillTick = tick() + 0.5 -- Кулдаун полсекунды
+                else
+                    hrp.CFrame = STATE.LockedPart.CFrame
+                    mouse1click()
+                end
+            else
+                hrp.CFrame = CFrame.new(hrp.Position.X, 100000, hrp.Position.Z)
+                hrp.Velocity = Vector3.new(0,0,0)
+            end
+        elseif originalPos then
+            -- originalPos = nil -- Возврат не просили, но оставим для логики
+        end
+
+        -- NORMAL AIM
+        if STATE.AimEnabled and STATE.LockedPart and not STATE.SkyTarget then
+            local isAiming = UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) or UIS:IsKeyDown(Enum.KeyCode.Backquote)
+            if isAiming then
+                local randHit = math.random(1, 100)
+                if randHit <= STATE.HitChance then
+                    local p = Camera:WorldToViewportPoint(STATE.LockedPart.Position)
+                    mousemoverel((p.X - mouseLoc.X)/STATE.AimSmooth, (p.Y - mouseLoc.Y)/STATE.AimSmooth)
+                end
             end
         end
-    end
 
-    -- MOVE LOGIC (Fly, Speed, Spin, Noclip)
-    if hrp and hum then
+        -- MOVE LOGIC
         if STATE.FlyEnabled then
             local flyDir = Vector3.new(0,0,0)
             if UIS:IsKeyDown(Enum.KeyCode.W) then flyDir += Camera.CFrame.LookVector end
@@ -483,53 +440,35 @@ RunService.RenderStepped:Connect(function()
             if UIS:IsKeyDown(Enum.KeyCode.D) then flyDir += Camera.CFrame.RightVector end
             if UIS:IsKeyDown(Enum.KeyCode.Space) then flyDir += Vector3.new(0,1,0) end
             if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then flyDir -= Vector3.new(0,1,0) end
-            
             hrp.Velocity = flyDir * STATE.FlySpeed
             if flyDir.Magnitude == 0 then hrp.Velocity = Vector3.new(0,0,0) end
-        elseif STATE.SpeedEnabled and hum.MoveDirection.Magnitude > 0 then 
-            hrp.CFrame += (hum.MoveDirection * STATE.SpeedPower / 5) 
-        end
+        elseif STATE.SpeedEnabled and hum and hum.MoveDirection.Magnitude > 0 then hrp.CFrame += (hum.MoveDirection * STATE.SpeedPower / 5) end
     end
     
-    -- ИСПРАВЛЕННЫЙ SPINBOT (ВЫНЕСЕН ИЗ BLOCK)
-    if STATE.SpinBot and hrp then 
-        bAV.Parent = hrp 
-        bAV.AngularVelocity = Vector3.new(0, STATE.SpinSpeed, 0) 
-    else 
-        bAV.Parent = nil 
+    -- SPIN & NOCLIP FIX (Always active if toggled)
+    if hrp then
+        if STATE.SpinBot then bAV.Parent = hrp; bAV.AngularVelocity = Vector3.new(0, STATE.SpinSpeed, 0) else bAV.Parent = nil end
     end
-    
-    -- ИСПРАВЛЕННЫЙ NOCLIP (ОБНОВЛЯЕТСЯ КАЖДЫЙ КАДР)
-    if STATE.Noclip and char then
-        for _, v in pairs(char:GetDescendants()) do
-            if v:IsA("BasePart") then v.CanCollide = false end
-        end
+    if STATE.Noclip and lp.Character then
+        for _, v in pairs(lp.Character:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide = false end end
     end
     
     FOV_Circle.Visible = (STATE.AimEnabled and STATE.Visible); FOV_Circle.Radius = STATE.AimFOV; FOV_Circle.Position = mouseLoc; FOV_Circle.Color = STATE.AccentColor
 end)
 
 UIS.InputBegan:Connect(function(i, g)
-    if not g and i.KeyCode == Enum.KeyCode[STATE.Bind_Menu] then 
-        lastMenuPress = tick()
-        STATE.Visible = not STATE.Visible; main.Visible = STATE.Visible 
-    end
+    if not g and i.KeyCode == Enum.KeyCode[STATE.Bind_Menu] then lastMenuPress = tick(); STATE.Visible = not STATE.Visible; main.Visible = STATE.Visible end
     if not g and i.KeyCode == Enum.KeyCode.E and STATE.TPBehindEnabled and STATE.TPBehindTarget and lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") then
         lp.Character.HumanoidRootPart.CFrame = STATE.TPBehindTarget.Character.HumanoidRootPart.CFrame * CFrame.new(0,0,3)
     end
     if not g and i.KeyCode == Enum.KeyCode.Q and STATE.HookEnabled then 
-        local unitRay = Camera:ViewportPointToRay(UIS:GetMouseLocation().X, UIS:GetMouseLocation().Y)
-        local params = RaycastParams.new(); params.FilterType = Enum.RaycastFilterType.Exclude; params.FilterDescendantsInstances = {lp.Character}
+        local unitRay = Camera:ViewportPointToRay(UIS:GetMouseLocation().X, UIS:GetMouseLocation().Y); local params = RaycastParams.new(); params.FilterType = Enum.RaycastFilterType.Exclude; params.FilterDescendantsInstances = {lp.Character}
         local res = workspace:Raycast(unitRay.Origin, unitRay.Direction * 5000, params)
         if res then hookTarget = res.Position; hooking = true end
     end
 end)
 
-UIS.InputEnded:Connect(function(i, g) 
-    if i.KeyCode == Enum.KeyCode.Q then 
-        hooking = false 
-    end 
-end)
+UIS.InputEnded:Connect(function(i, g) if i.KeyCode == Enum.KeyCode.Q then hooking = false end end)
 
 LoadConfig()
 pages.Aim.Visible = true
