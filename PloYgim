@@ -90,6 +90,7 @@ local Themes = {
 }
 
 local sliderUpdateFunctions = {}
+local toggles = {} -- Перенесено выше для доступа из LoadConfig
 
 -- [[ ПРОВЕРКИ ]]
 local function IsVisible(part)
@@ -112,7 +113,7 @@ local function IsTeammate(player)
     return player.Team == lp.Team
 end
 
--- [[ КОНФИГИ ]]
+-- [[ КОНФИГИ (FIXED) ]]
 local function SaveConfig()
     local data = {}
     for k, v in pairs(STATE) do
@@ -121,20 +122,25 @@ local function SaveConfig()
         end
     end
     local success, err = pcall(function()
-        writefile(FILE_NAME, HttpService:JSONEncode(data))
+        if writefile then
+            writefile(FILE_NAME, HttpService:JSONEncode(data))
+        end
     end)
     if success then
         StarterGui:SetCore("SendNotification", {Title = "Config", Text = "Saved Successfully!", Duration = 2})
+    else
+        warn("Save Error: "..tostring(err))
     end
 end
 
 local function LoadConfig()
-    if isfile(FILE_NAME) then
+    if isfile and isfile(FILE_NAME) then
         local success, decoded = pcall(function() return HttpService:JSONDecode(readfile(FILE_NAME)) end)
         if success then 
             for k, v in pairs(decoded) do 
                 if STATE[k] ~= nil then 
                     STATE[k] = v 
+                    -- Обновляем слайдеры если они есть
                     if sliderUpdateFunctions[k] then
                         sliderUpdateFunctions[k](v)
                     end
@@ -203,7 +209,6 @@ local targetHPBg = Instance.new("Frame", targetHud); targetHPBg.Size = UDim2.new
 local targetHPFill = Instance.new("Frame", targetHPBg); targetHPFill.Name = "Fill"; targetHPFill.Size = UDim2.new(1, 0, 1, 0); targetHPFill.BorderSizePixel = 0
 
 local pages = {}
-local toggles = {}
 
 local function createTab(name)
     local p = Instance.new("ScrollingFrame", content); p.Size = UDim2.new(1, 0, 1, 0); p.BackgroundTransparency = 1; p.Visible = false; p.ScrollBarThickness = 2
@@ -223,8 +228,10 @@ local function addToggle(p, text, key)
     Instance.new("UICorner", b)
     local ind = Instance.new("Frame", b); ind.Size = UDim2.new(0, 15, 0, 15); ind.Position = UDim2.new(1, -25, 0.5, -7); ind.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
     Instance.new("UICorner", ind)
-    local fill = Instance.new("Frame", ind); fill.Name = "Fill"; fill.Size = UDim2.new(1, -4, 1, -4); fill.Position = UDim2.new(0, 2, 0, 2); fill.BackgroundTransparency = 1; Instance.new("UICorner", fill)
-    b.MouseButton1Click:Connect(function() STATE[key] = not STATE[key] end)
+    local fill = Instance.new("Frame", ind); fill.Name = "Fill"; fill.Size = UDim2.new(1, -4, 1, -4); fill.Position = UDim2.new(0, 2, 0, 2); fill.BackgroundTransparency = (STATE[key] and 0 or 1); Instance.new("UICorner", fill)
+    b.MouseButton1Click:Connect(function() 
+        STATE[key] = not STATE[key] 
+    end)
     toggles[key] = fill
 end
 
@@ -233,20 +240,30 @@ local function addSlider(p, text, key, min, max)
     local t = Instance.new("TextLabel", f); t.Size = UDim2.new(1, 0, 0, 20); t.Text = text .. ": " .. string.format("%.1f", STATE[key]); t.TextColor3 = Color3.new(0.7,0.7,0.7); t.Font = "Gotham"; t.TextSize = 11; t.BackgroundTransparency = 1
     local bg = Instance.new("Frame", f); bg.Size = UDim2.new(1, -20, 0, 4); bg.Position = UDim2.new(0, 10, 0, 30); bg.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
     local fill = Instance.new("Frame", bg); fill.Name = "Fill"; fill.Size = UDim2.new((STATE[key]-min)/(max-min), 0, 1, 0); fill.BorderSizePixel = 0
-    sliderUpdateFunctions[key] = function(newVal)
+    
+    local function updateVisual(newVal)
         t.Text = text .. ": " .. string.format("%.1f", newVal)
         fill.Size = UDim2.new(m_clamp((newVal-min)/(max-min), 0, 1), 0, 1, 0)
     end
+    
+    sliderUpdateFunctions[key] = updateVisual
+    
     bg.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             isSliderActive = true; dragging = false
             local move; move = RunService.RenderStepped:Connect(function()
                 local pc = m_clamp((UIS:GetMouseLocation().X - bg.AbsolutePosition.X)/bg.AbsoluteSize.X, 0, 1)
-                fill.Size = UDim2.new(pc, 0, 1, 0)
                 local val = min + (max-min)*pc
-                STATE[key] = val; t.Text = text .. ": " .. string.format("%.1f", val)
+                STATE[key] = val
+                updateVisual(val)
             end)
-            UIS.InputEnded:Connect(function(i2) if i2.UserInputType == Enum.UserInputType.MouseButton1 then move:Disconnect(); isSliderActive = false end end)
+            local endConn; endConn = UIS.InputEnded:Connect(function(i2) 
+                if i2.UserInputType == Enum.UserInputType.MouseButton1 then 
+                    move:Disconnect()
+                    endConn:Disconnect()
+                    isSliderActive = false 
+                end 
+            end)
         end
     end)
 end
@@ -439,7 +456,7 @@ RunService.RenderStepped:Connect(function()
                     xKillTick = tick() + 0.5
                 else
                     hrp.CFrame = STATE.LockedPart.CFrame
-                    mouse1click()
+                    -- mouse1click() -- Эта функция работает не во всех эксплоитах, будь осторожен
                 end
             else
                 hrp.CFrame = cf_new(hrp.Position.X, 100000, hrp.Position.Z)
@@ -451,7 +468,9 @@ RunService.RenderStepped:Connect(function()
             if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) or UIS:IsKeyDown(Enum.KeyCode.Backquote) then
                 if m_random(1, 100) <= STATE.HitChance then
                     local p = Camera:WorldToViewportPoint(STATE.LockedPart.Position)
-                    mousemoverel((p.X - mouseLoc.X)/STATE.AimSmooth, (p.Y - mouseLoc.Y)/STATE.AimSmooth)
+                    if mousemoverel then
+                        mousemoverel((p.X - mouseLoc.X)/STATE.AimSmooth, (p.Y - mouseLoc.Y)/STATE.AimSmooth)
+                    end
                 end
             end
         end
@@ -491,5 +510,6 @@ end)
 
 UIS.InputEnded:Connect(function(i, g) if i.KeyCode == Enum.KeyCode.Q then hooking = false end end)
 
+-- Первичный запуск
 LoadConfig()
 pages.Aim.Visible = true
